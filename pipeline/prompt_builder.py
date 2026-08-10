@@ -1,0 +1,123 @@
+"""
+Builds the system prompt and Chain-of-Thought user prompt sent to Gemini.
+No programmatic XAI text description is generated here — per the project's
+Design Decision favoring multimodal grounding, Gemini is shown both images
+directly and reasons from them, rather than consuming a text proxy.
+"""
+import config
+
+SYSTEM_PROMPT = """\
+You are an expert plant pathologist and agricultural extension officer
+advising Filipino maize farmers. You have deep knowledge of Maize Streak
+Virus (MSV) and Maize Lethal Necrosis (MLN) as they affect Zea mays L.
+in the Philippine context.
+
+Your role is to convert computer vision diagnostic outputs into clear,
+actionable, culturally appropriate guidance that a smallholder farmer
+or agriculture student can immediately act on.
+
+RULES:
+1. Base all advice ONLY on the retrieved agricultural knowledge provided.
+   Never generate management protocols from memory alone.
+2. Always reference specific morphological markers visible in the attached
+   images when writing the justification.
+3. Severity Stage 3 (>60%) requires immediate rouging instructions.
+4. All chemical control recommendations must use only DA-Philippines
+   registered pesticides when Philippine-specific sources are available.
+5. Tagalog translations must preserve clinical safety — never simplify
+   a safety instruction to the point of ambiguity.
+6. If a low-confidence notice is present in the diagnostic inputs, open
+   the justification by noting the classification is uncertain and
+   recommend the farmer confirm with a DA extension officer before
+   acting on chemical control recommendations specifically.
+7. Respond ONLY in valid JSON. No preamble, no markdown backticks.
+"""
+
+_COT_TEMPLATE = """\
+DIAGNOSTIC INPUTS (from MAIze computer vision model):
+- Disease classification : {classification}  (confidence: {confidence_pct})
+- Infected tissue area   : {severity_pct:.1f}%
+- Severity grade         : {grade_label}  (Grade {cimmyt_grade})
+- Monitoring stage       : Stage {monitoring_stage} / 3
+{low_confidence_notice}
+
+[ATTACHED IMAGE 1 - Original leaf photograph]
+[ATTACHED IMAGE 2 - Grad-CAM++ diagnostic attention overlay:
+                    amber/red regions = high model attention,
+                    blue regions = low model attention]
+
+RETRIEVED EXPERT KNOWLEDGE (from verified agricultural sources):
+{rag_context}
+
+CHAIN-OF-THOUGHT REASONING - think step by step before responding:
+Step 1: Looking at both attached images, what specific visual markers
+         are present on the leaf, and which regions does the Grad-CAM++
+         overlay highlight? What pattern do they form?
+Step 2: Why does this pattern indicate {classification} at this severity?
+         What distinguishes it from other conditions (nutrient deficiency,
+         other diseases)?
+Step 3: Given Grade {cimmyt_grade} and Stage {monitoring_stage}, what is
+         the urgency level? What happens if no action is taken?
+Step 4: What are the most critical immediate actions for Stage {monitoring_stage}?
+Step 5: What spread prevention measures are most important in the
+         Philippine field context?
+
+Now generate your response as a JSON object with this exact structure:
+{{
+  "justification": "2-3 sentences explaining WHY this classification was made, referencing the specific visual evidence you see in the attached images.",
+  "xai_explanation": "1-2 sentences describing what the amber heatmap shows and what it means diagnostically.",
+  "key_fact": "One critical fact the farmer must know.",
+  "immediate_actions": ["action1", "action2", "action3"],
+  "management": ["step1", "step2", "step3", "step4"],
+  "spread": "How this disease spreads (vector, mechanism, distance).",
+  "distances": "Specific recommended distances for rouging/isolation.",
+  "prevention": ["measure1", "measure2", "measure3"],
+  "precautions": ["precaution1", "precaution2"],
+  "detection": "How to monitor for progression or new infections.",
+  "control": {{
+    "chemical": "Specific chemical control with DA-registered products.",
+    "biological": "Biological control options if available.",
+    "cultural": "Cultural practices (crop rotation, planting schedule, etc.)"
+  }},
+  "protocol_title": "MSV/MLN Rapid Response Protocol",
+  "protocol_steps": ["step1", "step2", "step3", "step4"],
+  "tagalog": {{
+    "justification": "...",
+    "key_fact": "...",
+    "protocol_steps": ["...", "...", "...", "..."],
+    "immediate_actions": ["...", "...", "..."]
+  }}
+}}
+"""
+
+
+def build_low_confidence_notice(confidence: float) -> str:
+    if confidence < config.LOW_CONFIDENCE_THRESHOLD:
+        return (
+            f"- \u26a0 LOW CONFIDENCE ({confidence:.1%}): classification is "
+            f"uncertain. Guidance must open with a caveat recommending the "
+            f"farmer confirm with a DA extension officer before acting, "
+            f"especially on chemical control."
+        )
+    return ""
+
+
+def build_cot_prompt(
+    classification: str,
+    confidence: float,
+    severity_pct: float,
+    cimmyt_grade: int,
+    monitoring_stage: int,
+    grade_label: str,
+    rag_context: str,
+) -> str:
+    return _COT_TEMPLATE.format(
+        classification=classification,
+        confidence_pct=f"{confidence:.1%}",
+        severity_pct=severity_pct,
+        grade_label=grade_label,
+        cimmyt_grade=cimmyt_grade,
+        monitoring_stage=monitoring_stage,
+        low_confidence_notice=build_low_confidence_notice(confidence),
+        rag_context=rag_context or "No specific retrieved context available.",
+    )
