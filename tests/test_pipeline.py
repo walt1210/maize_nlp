@@ -45,9 +45,12 @@ def test_validate_diagnostic_fields_rejects_bad_confidence():
 
 def test_prepare_images_from_placeholders():
     images = make_placeholder_images()
-    original, gradcam = prepare_images(images["original_image_b64"], images["gradcam_overlay_b64"])
+    original, segmentation, xai = prepare_images(
+        images["original_image_b64"], images["segmentation_overlay_b64"], images["xai_overlay_b64"]
+    )
     assert original.size[0] <= 512 and original.size[1] <= 512
-    assert gradcam.mode == "RGB"
+    assert segmentation.mode == "RGB"
+    assert xai.mode == "RGB"
 
 
 def test_b64_to_pil_rejects_garbage():

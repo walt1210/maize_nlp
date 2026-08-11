@@ -64,9 +64,12 @@ def diagnose():
         classification = body["classification"]
         confidence = float(body["confidence"])
         severity_pct = float(body["severity_pct"])
-        cimmyt_grade = int(body["cimmyt_grade"])
         original_image_b64 = body["original_image_b64"]
-        gradcam_overlay_b64 = body["gradcam_overlay_b64"]
+        # Two DISTINCT overlays from the Student model, per evaluate_xai.py:
+        # a crisp segmentation-boundary contour AND a separate XAI attention
+        # heatmap. Not the same image, not interchangeable.
+        segmentation_overlay_b64 = body["segmentation_overlay_b64"]
+        xai_overlay_b64 = body["xai_overlay_b64"]
     except (KeyError, TypeError, ValueError) as exc:
         return jsonify({"status": "error", "error": f"missing or invalid field: {exc}"}), 400
 
@@ -75,12 +78,18 @@ def diagnose():
 
     try:
         input_processor.validate_diagnostic_fields(classification, confidence, severity_pct)
-        original_image, gradcam_image = input_processor.prepare_images(
-            original_image_b64, gradcam_overlay_b64
+        original_image, segmentation_image, xai_image = input_processor.prepare_images(
+            original_image_b64, segmentation_overlay_b64, xai_overlay_b64
         )
     except InputValidationError as exc:
         return jsonify({"status": "error", "error": str(exc)}), 400
 
+    # cimmyt_grade is NOT sent by the client — the Student model only
+    # outputs a continuous severity_pct (see train_student.py /
+    # export_tflite.py), never a 1-5 CIMMYT grade. Computing it here
+    # server-side, from the same severity_pct the model actually
+    # produces, avoids trusting the Android app to derive it correctly.
+    cimmyt_grade = input_processor.severity_to_cimmyt_grade(classification, severity_pct)
     monitoring_stage = input_processor.severity_to_stage(severity_pct, classification)
     label = input_processor.grade_label(classification, cimmyt_grade)
     low_confidence = input_processor.needs_confidence_caveat(confidence)
@@ -97,7 +106,8 @@ def diagnose():
         grade_label=label,
         rag_context=rag_context,
         original_image=original_image,
-        gradcam_image=gradcam_image,
+        segmentation_image=segmentation_image,
+        xai_image=xai_image,
     )
 
     response = {

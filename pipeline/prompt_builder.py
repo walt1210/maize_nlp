@@ -1,8 +1,9 @@
 """
 Builds the system prompt and Chain-of-Thought user prompt sent to Gemini.
 No programmatic XAI text description is generated here — per the project's
-Design Decision favoring multimodal grounding, Gemini is shown both images
-directly and reasons from them, rather than consuming a text proxy.
+Design Decision favoring multimodal grounding, Gemini is shown all three
+images directly (original photo, segmentation boundary, XAI heatmap) and
+reasons from them, rather than consuming a text proxy.
 """
 import config
 
@@ -42,17 +43,24 @@ DIAGNOSTIC INPUTS (from MAIze computer vision model):
 {low_confidence_notice}
 
 [ATTACHED IMAGE 1 - Original leaf photograph]
-[ATTACHED IMAGE 2 - Grad-CAM++ diagnostic attention overlay:
+[ATTACHED IMAGE 2 - Symptom boundary overlay: a crisp green contour from
+                    the model's segmentation head, showing the precise
+                    pixel-level extent of visible symptoms on the leaf]
+[ATTACHED IMAGE 3 - {xai_method_name} diagnostic attention overlay:
                     amber/red regions = high model attention,
-                    blue regions = low model attention]
+                    blue regions = low model attention. This is a
+                    DIFFERENT thing from Image 2 — it shows which regions
+                    drove the model's classification decision, not the
+                    exact symptom boundary]
 
 RETRIEVED EXPERT KNOWLEDGE (from verified agricultural sources):
 {rag_context}
 
 CHAIN-OF-THOUGHT REASONING - think step by step before responding:
-Step 1: Looking at both attached images, what specific visual markers
-         are present on the leaf, and which regions does the Grad-CAM++
-         overlay highlight? What pattern do they form?
+Step 1: Looking at all three attached images, what specific visual markers
+         are present on the leaf? Does the segmentation boundary (Image 2)
+         match where the {xai_method_name} attention (Image 3) is
+         concentrated, or do they diverge? What pattern do they form together?
 Step 2: Why does this pattern indicate {classification} at this severity?
          What distinguishes it from other conditions (nutrient deficiency,
          other diseases)?
@@ -65,7 +73,7 @@ Step 5: What spread prevention measures are most important in the
 Now generate your response as a JSON object with this exact structure:
 {{
   "justification": "2-3 sentences explaining WHY this classification was made, referencing the specific visual evidence you see in the attached images.",
-  "xai_explanation": "1-2 sentences describing what the amber heatmap shows and what it means diagnostically.",
+  "xai_explanation": "1-2 sentences describing what the segmentation boundary and the {xai_method_name} heatmap each show, and what their agreement or divergence means diagnostically.",
   "key_fact": "One critical fact the farmer must know.",
   "immediate_actions": ["action1", "action2", "action3"],
   "management": ["step1", "step2", "step3", "step4"],
@@ -120,4 +128,5 @@ def build_cot_prompt(
         monitoring_stage=monitoring_stage,
         low_confidence_notice=build_low_confidence_notice(confidence),
         rag_context=rag_context or "No specific retrieved context available.",
+        xai_method_name=config.XAI_METHOD_DISPLAY_NAME,
     )

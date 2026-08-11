@@ -29,7 +29,8 @@ def get_guidance(
     grade_label: str,
     rag_context: str,
     original_image,
-    gradcam_image,
+    segmentation_image,
+    xai_image,
 ):
     """Returns (source: 'gemini' | 'offline', guidance_dict)."""
     if force_offline:
@@ -45,7 +46,8 @@ def get_guidance(
             grade_label=grade_label,
             rag_context=rag_context,
             original_image=original_image,
-            gradcam_image=gradcam_image,
+            segmentation_image=segmentation_image,
+            xai_image=xai_image,
         )
         return "gemini", result.model_dump()
     except GeminiCallError:

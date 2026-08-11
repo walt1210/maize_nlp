@@ -35,6 +35,22 @@ RETRIEVAL_K = 3
 LOW_CONFIDENCE_THRESHOLD = 0.6  # below this, guidance opens with an extension-officer caveat
 GEMINI_TIMEOUT_SECONDS = 10  # falls back to offline guidance if exceeded
 
+# --- XAI method (deployed heatmap) ----------------------------------------------
+# evaluate_xai.py (training pipeline, separate codebase) benchmarks Grad-CAM,
+# Grad-CAM++, and Score-CAM, then auto-writes the winner to XAI_DEPLOYED_METHOD
+# in ITS OWN config.py. That doesn't propagate here automatically — the two
+# config.py files are in separate projects and don't sync. Whoever deploys a
+# new Student/XAI model must manually update XAI_METHOD below to match
+# whatever evaluate_xai.py selected, or the prompt will describe the wrong
+# method to Gemini.
+XAI_METHOD = "gradcamplusplus"  # one of: gradcam, gradcamplusplus, scorecam
+XAI_METHOD_DISPLAY_NAMES = {
+    "gradcam": "Grad-CAM",
+    "gradcamplusplus": "Grad-CAM++",
+    "scorecam": "Score-CAM",
+}
+XAI_METHOD_DISPLAY_NAME = XAI_METHOD_DISPLAY_NAMES.get(XAI_METHOD, XAI_METHOD)
+
 # --- Grading / staging ---------------------------------------------------------
 GRADE_LABELS = {
     "MSV": {

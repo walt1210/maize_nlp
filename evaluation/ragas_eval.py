@@ -47,8 +47,8 @@ def _build_synthetic_cases(n_per_class: int = 10) -> list[dict]:
 
 def run_pipeline_for_case(case: dict) -> dict:
     images = make_placeholder_images()
-    original_image, gradcam_image = input_processor.prepare_images(
-        images["original_image_b64"], images["gradcam_overlay_b64"]
+    original_image, segmentation_image, xai_image = input_processor.prepare_images(
+        images["original_image_b64"], images["segmentation_overlay_b64"], images["xai_overlay_b64"]
     )
     monitoring_stage = input_processor.severity_to_stage(case["severity_pct"], case["classification"])
     label = input_processor.grade_label(case["classification"], case["cimmyt_grade"])
@@ -66,7 +66,8 @@ def run_pipeline_for_case(case: dict) -> dict:
             grade_label=label,
             rag_context=rag_context,
             original_image=original_image,
-            gradcam_image=gradcam_image,
+            segmentation_image=segmentation_image,
+            xai_image=xai_image,
         )
         answer = result.justification + " " + " ".join(result.management)
     except GeminiCallError as exc:
