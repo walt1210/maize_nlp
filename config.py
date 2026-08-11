@@ -5,7 +5,14 @@ All tunable values live here so nothing is hardcoded in the pipeline modules.
 import os
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 BASE_DIR = Path(__file__).resolve().parent
+
+# Loads .env into the process environment automatically, cross-platform.
+# In production (Cloud Run), real env vars/secrets are already set and
+# there's no .env file — load_dotenv() silently no-ops in that case.
+load_dotenv(BASE_DIR / ".env")
 
 # --- API keys / auth -------------------------------------------------------
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
@@ -15,7 +22,7 @@ MAIZE_API_KEY = os.environ.get("MAIZE_API_KEY")  # shared key the Android app se
 # --- Models ------------------------------------------------------------------
 GEMINI_MODEL = "gemini-2.5-flash"
 GPT_COMPARISON_MODEL = "gpt-4o-mini"  # comparison-only, never called in the deployed app
-EMBEDDING_MODEL = "models/text-embedding-004"
+EMBEDDING_MODEL = "models/gemini-embedding-001"  # text-embedding-004 was shut down Jan 14, 2026
 
 # --- RAG ---------------------------------------------------------------------
 CHROMA_PERSIST_DIR = os.environ.get("CHROMA_PERSIST_DIR", str(BASE_DIR / "rag" / "chroma_db"))

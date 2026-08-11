@@ -2,3 +2,8 @@
 .env.local
 .env.development
 .env.production
+# Ignore Python cache directories
+__pycache__/
+*.py[cod]
+*.bin
+*.sqlite3
