@@ -10,10 +10,11 @@ from flask import Flask, jsonify, request
 import config
 from chatbot import conversation_manager
 from offline.static_guidance import OFFLINE_GUIDANCE
-from pipeline import input_processor, rag_engine
+from pipeline import input_processor, rag_engine, xai_engine
 from pipeline.input_processor import InputValidationError
 from pipeline.offline_fallback import get_guidance
 from pipeline.tagalog_handler import translate_text
+from pipeline.xai_engine import XaiEngineError
 
 app = Flask(__name__)
 
@@ -65,11 +66,9 @@ def diagnose():
         confidence = float(body["confidence"])
         severity_pct = float(body["severity_pct"])
         original_image_b64 = body["original_image_b64"]
-        # Two DISTINCT overlays from the Student model, per evaluate_xai.py:
-        # a crisp segmentation-boundary contour AND a separate XAI attention
-        # heatmap. Not the same image, not interchangeable.
-        segmentation_overlay_b64 = body["segmentation_overlay_b64"]
-        xai_overlay_b64 = body["xai_overlay_b64"]
+        # NOT segmentation_overlay_b64 / xai_overlay_b64 — those are
+        # generated server-side now (see pipeline/xai_engine.py), since
+        # TFLite (on-device) can't run gradient-based XAI methods.
     except (KeyError, TypeError, ValueError) as exc:
         return jsonify({"status": "error", "error": f"missing or invalid field: {exc}"}), 400
 
@@ -78,11 +77,22 @@ def diagnose():
 
     try:
         input_processor.validate_diagnostic_fields(classification, confidence, severity_pct)
-        original_image, segmentation_image, xai_image = input_processor.prepare_images(
-            original_image_b64, segmentation_overlay_b64, xai_overlay_b64
-        )
+        original_image = input_processor.prepare_original_image(original_image_b64)
     except InputValidationError as exc:
         return jsonify({"status": "error", "error": str(exc)}), 400
+
+    # Only generate overlays when actually calling Gemini — static offline
+    # guidance is plain text lookup and never touches images (see
+    # offline/static_guidance.py), so skip this entirely when force_offline
+    # is set. Also means local testing with {"offline": true} works without
+    # needing the real Student checkpoint bundled yet.
+    segmentation_image = None
+    xai_image = None
+    if not force_offline:
+        try:
+            segmentation_image, xai_image = xai_engine.generate_overlays(original_image, classification)
+        except XaiEngineError as exc:
+            return jsonify({"status": "error", "error": f"XAI generation failed: {exc}"}), 502
 
     # cimmyt_grade is NOT sent by the client — the Student model only
     # outputs a continuous severity_pct (see train_student.py /
@@ -106,8 +116,8 @@ def diagnose():
         grade_label=label,
         rag_context=rag_context,
         original_image=original_image,
-        segmentation_image=segmentation_image,
-        xai_image=xai_image,
+        segmentation_image=input_processor.resize_for_gemini(segmentation_image) if segmentation_image else None,
+        xai_image=input_processor.resize_for_gemini(xai_image) if xai_image else None,
     )
 
     response = {
@@ -140,6 +150,15 @@ def diagnose():
         },
         "rag_sources": rag_sources if source == "gemini" else [],
     }
+
+    # Only present when overlays were actually generated (source == "gemini"
+    # attempted the full path) — offline responses have no overlay images,
+    # since static guidance never needed them in the first place.
+    if segmentation_image is not None and xai_image is not None:
+        response["overlays"] = {
+            "segmentation_overlay_b64": input_processor.pil_to_b64(segmentation_image),
+            "xai_overlay_b64": input_processor.pil_to_b64(xai_image),
+        }
 
     if include_tagalog:
         response["tagalog"] = guidance["tagalog"]

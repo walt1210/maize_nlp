@@ -18,7 +18,7 @@ from datasets import Dataset
 from ragas import evaluate
 from ragas.metrics import answer_relevancy, faithfulness
 
-from pipeline import input_processor, rag_engine
+from pipeline import input_processor, rag_engine, xai_engine
 from pipeline.gemini_engine import GeminiCallError, generate_guidance
 from sample_data.mock_student_output import make_placeholder_images
 
@@ -46,10 +46,17 @@ def _build_synthetic_cases(n_per_class: int = 10) -> list[dict]:
 
 
 def run_pipeline_for_case(case: dict) -> dict:
+    # Requires a real Student checkpoint at pipeline/student_model/checkpoints/
+    # — this evaluation exercises the full deployed pipeline, including
+    # server-side XAI generation (see pipeline/xai_engine.py), not a
+    # lightweight mock. If you're iterating on RAG/prompt quality only and
+    # don't have a checkpoint bundled yet, this will fail at generate_overlays().
     images = make_placeholder_images()
-    original_image, segmentation_image, xai_image = input_processor.prepare_images(
-        images["original_image_b64"], images["segmentation_overlay_b64"], images["xai_overlay_b64"]
-    )
+    original_image = input_processor.prepare_original_image(images["original_image_b64"])
+    segmentation_image, xai_image = xai_engine.generate_overlays(original_image, case["classification"])
+    segmentation_image = input_processor.resize_for_gemini(segmentation_image)
+    xai_image = input_processor.resize_for_gemini(xai_image)
+
     monitoring_stage = input_processor.severity_to_stage(case["severity_pct"], case["classification"])
     label = input_processor.grade_label(case["classification"], case["cimmyt_grade"])
     rag_context, _sources = rag_engine.retrieve_context(

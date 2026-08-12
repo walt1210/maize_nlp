@@ -51,6 +51,47 @@ XAI_METHOD_DISPLAY_NAMES = {
 }
 XAI_METHOD_DISPLAY_NAME = XAI_METHOD_DISPLAY_NAMES.get(XAI_METHOD, XAI_METHOD)
 
+# --- Student model (server-side XAI/segmentation inference) --------------------
+# TFLite (used on-device for classification/severity) is inference-only and
+# can't do gradient-based XAI (Grad-CAM/Grad-CAM++ need backprop). So the
+# server loads the full PyTorch Student checkpoint to generate the two
+# overlay images. Classification/confidence/severity_pct are NOT recomputed
+# here — the on-device values stay the source of truth (see app.py); this
+# is only used for seg_logits + CAM activations.
+#
+# These MUST match the training pipeline's config.py values for whichever
+# checkpoint is actually bundled into the Docker image — update both
+# together, they're separate codebases that don't auto-sync (same caveat
+# as XAI_METHOD above).
+STUDENT_IMG_SIZE = 224
+STUDENT_BEST_VARIANT = "mobilenet_v2_cbam"
+STUDENT_FACTORY_MODE = "mode_b"
+STUDENT_DROPOUT = 0.3
+CBAM_SPATIAL_KERNEL = 7
+CLASSES = ["HEALTHY", "MSV", "MLN"]
+CLASS_TO_IDX = {"HEALTHY": 0, "MSV": 1, "MLN": 2}
+
+# Checkpoint must be present in the deployed image at this path — bundled
+# the same way rag/chroma_db/ is (see Dockerfile), NOT downloaded at
+# runtime or baked in via a build ARG (same leak risk as the Gemini key).
+STUDENT_CKPT_PATH = os.environ.get(
+    "STUDENT_CKPT_PATH",
+    str(BASE_DIR / "student_model" / "checkpoints" /
+        f"student_{STUDENT_BEST_VARIANT}_{STUDENT_FACTORY_MODE}_best.pth"),
+)
+
+# Target layer for Grad-CAM/Grad-CAM++/Score-CAM, resolved against
+# model.unet (NOT the top-level StudentModel — see pipeline/xai_engine.py
+# for why get_target_layer() must be called on model.unet.encoder, not
+# model.encoder, which doesn't exist on StudentModel directly).
+XAI_TARGET_LAYERS = {
+    "mobilenet_v2": "encoder.features[-1][0]",
+    "mobilenet_v2_cbam": "encoder.features[-1][0]",
+    "mobilenet_v3_small": "encoder.features[-1][0]",
+    "efficientnet_b0": "encoder.blocks[-1][-1]",
+    "efficientnet_b0_cbam": "encoder.blocks[-1][-1]",
+}
+
 # --- Grading / staging ---------------------------------------------------------
 GRADE_LABELS = {
     "MSV": {
@@ -69,6 +110,31 @@ GRADE_LABELS = {
     },
     "HEALTHY": {0: "No symptoms"},
 }
+
+# Authoritative bracket tables, copied from the training pipeline's own
+# config.py (CIMMYT_MSV_BRACKETS / CIMMYT_MLN_BRACKETS) rather than
+# re-derived — these are what factory_master.py used to LABEL the
+# training data, so matching them exactly (including the lower-inclusive,
+# upper-exclusive boundary convention) keeps the deployed grade
+# computation consistent with what the model was actually trained against.
+# MSV source: Soto et al. (1982), validated by Sime et al. (2021),
+#   Agriculture 11(2):130. https://doi.org/10.3390/agriculture11020130
+# MLN source: Beyene et al. (2017), Euphytica 213:224.
+#   https://doi.org/10.1007/s10681-017-2012-3
+CIMMYT_MSV_BRACKETS = [
+    (0, 10, 1),
+    (10, 25, 2),
+    (25, 50, 3),
+    (50, 75, 4),
+    (75, 101, 5),
+]
+CIMMYT_MLN_BRACKETS = [
+    (0, 10, 1),
+    (10, 25, 2),
+    (25, 50, 3),
+    (50, 75, 4),
+    (75, 101, 5),
+]
 
 # --- Image handling ------------------------------------------------------------
 MAX_IMAGE_DIMENSION = 512  # px, thumbnail max side for Gemini vision calls

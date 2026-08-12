@@ -16,3 +16,14 @@ numpy>=1.24.0
 python-dotenv>=1.0.0
 pydantic>=2.0.0
 pytest>=8.0.0
+
+# --- Server-side XAI/segmentation inference (pipeline/xai_engine.py) -----------
+# Needed because TFLite (on-device) can't run gradient-based XAI methods
+# like Grad-CAM++ — the full PyTorch Student model runs server-side instead.
+# NOTE: this is a heavy addition. torch + segmentation-models-pytorch alone
+# add roughly 1-2 GB to the Docker image; size Cloud Run memory/CPU
+# accordingly (see cloudbuild.yaml comment).
+torch>=2.0.0
+segmentation-models-pytorch>=0.3.0
+grad-cam>=1.5.0
+opencv-python-headless>=4.9.0

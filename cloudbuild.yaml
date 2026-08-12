@@ -13,9 +13,18 @@ steps:
       - '--region=asia-southeast1'
       - '--platform=managed'
       - '--allow-unauthenticated'
-      - '--memory=512Mi'
-      - '--cpu=1'
-      - '--timeout=120'
+      - '--memory=4Gi'
+      - '--cpu=2'
+      - '--timeout=180'
+      # Bumped from the original 512Mi/1cpu/120s: the server now loads a
+      # full PyTorch Student model (torch + segmentation-models-pytorch)
+      # for server-side XAI/segmentation overlay generation, since TFLite
+      # can't run gradient-based methods like Grad-CAM++. CPU-only
+      # inference for one image is real added latency (model load is a
+      # one-time cost per container instance, but the forward pass +
+      # Score-CAM/Grad-CAM++ computation happens every /diagnose call) —
+      # these values are a starting point, not tuned; benchmark and
+      # adjust once the actual checkpoint is bundled.
       - '--max-instances=1'
       # max-instances=1 is a deliberate thesis-scope workaround: in-memory
       # chatbot sessions have no cross-instance affinity on Cloud Run, so

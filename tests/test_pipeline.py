@@ -5,7 +5,9 @@ from pipeline.input_processor import (
     b64_to_pil,
     grade_label,
     needs_confidence_caveat,
-    prepare_images,
+    prepare_original_image,
+    resize_for_gemini,
+    severity_to_cimmyt_grade,
     severity_to_stage,
     validate_diagnostic_fields,
 )
@@ -33,6 +35,19 @@ def test_grade_label_known_and_unknown():
     assert grade_label("MSV", 99) == "Grade 99"  # unknown grade doesn't crash
 
 
+def test_severity_to_cimmyt_grade_matches_training_brackets():
+    # Lower-inclusive, upper-exclusive — severity==10.0 falls in the next
+    # bracket up, matching config.CIMMYT_MSV_BRACKETS exactly (see
+    # input_processor.severity_to_cimmyt_grade docstring).
+    assert severity_to_cimmyt_grade("HEALTHY", 0.0) == 0
+    assert severity_to_cimmyt_grade("MSV", 9.9) == 1
+    assert severity_to_cimmyt_grade("MSV", 10.0) == 2   # boundary: goes to grade 2, not 1
+    assert severity_to_cimmyt_grade("MSV", 24.9) == 2
+    assert severity_to_cimmyt_grade("MSV", 25.0) == 3
+    assert severity_to_cimmyt_grade("MSV", 99.9) == 5
+    assert severity_to_cimmyt_grade("MLN", 50.0) == 4
+
+
 def test_validate_diagnostic_fields_rejects_bad_classification():
     with pytest.raises(InputValidationError):
         validate_diagnostic_fields("CORN_RUST", 0.9, 20.0)
@@ -43,14 +58,19 @@ def test_validate_diagnostic_fields_rejects_bad_confidence():
         validate_diagnostic_fields("MSV", 1.5, 20.0)
 
 
-def test_prepare_images_from_placeholders():
+def test_prepare_original_image_from_placeholder():
     images = make_placeholder_images()
-    original, segmentation, xai = prepare_images(
-        images["original_image_b64"], images["segmentation_overlay_b64"], images["xai_overlay_b64"]
-    )
+    original = prepare_original_image(images["original_image_b64"])
     assert original.size[0] <= 512 and original.size[1] <= 512
-    assert segmentation.mode == "RGB"
-    assert xai.mode == "RGB"
+    assert original.mode == "RGB"
+
+
+def test_resize_for_gemini_does_not_mutate_input():
+    images = make_placeholder_images()
+    original = prepare_original_image(images["original_image_b64"])
+    resized = resize_for_gemini(original)
+    assert resized.size[0] <= 512 and resized.size[1] <= 512
+    assert resized is not original  # copy, not the same object
 
 
 def test_b64_to_pil_rejects_garbage():
