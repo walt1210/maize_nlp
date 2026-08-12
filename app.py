@@ -131,7 +131,15 @@ def diagnose():
         "monitoring_stage": monitoring_stage,
         "diagnosis": {
             "justification": guidance["justification"],
-            "xai_explanation": guidance["xai_explanation"],
+            # .get() with a fallback, not guidance["xai_explanation"] — the
+            # 12 static offline entries never have this key, since offline
+            # mode skips overlay generation entirely (nothing to explain).
+            # Only Gemini's response schema guarantees this field.
+            "xai_explanation": guidance.get(
+                "xai_explanation",
+                "Visual analysis unavailable in offline mode — showing general "
+                "guidance based on classification and severity only.",
+            ),
             "key_fact": guidance["key_fact"],
         },
         "guidance": {
