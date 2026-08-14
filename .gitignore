@@ -1,9 +1,40 @@
+# --- Secrets — never commit ---------------------------------------------
 .env
-.env.local
-.env.development
-.env.production
-# Ignore Python cache directories
+# .env.example IS meant to be committed (placeholders only)
+
+# --- Python ----------------------------------------------------------------
 __pycache__/
 *.py[cod]
-*.bin
-*.sqlite3
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# --- Virtual environment ----------------------------------------------------
+venv/
+.venv/
+env/
+
+# --- Generated / regenerable — rebuild via documented commands, not committed --
+# rag/chroma_db/: rebuild with `python -m rag.ingest`
+rag/chroma_db/
+# Trained checkpoint: large binary, share separately (see README), not via git
+pipeline/student_model/checkpoints/*.pth
+
+# --- Copyrighted source material — not ours to redistribute -----------------
+# CIMMYT manuals, journal articles, etc. Document sources/citations in
+# README instead so the knowledge base can be rebuilt independently.
+rag/knowledge_base/*.pdf
+
+# --- Test/debug artifacts ----------------------------------------------------
+debug_*.png
+debug_*.jpg
+
+# --- IDE / OS ---------------------------------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# --- Build/dist (if packaging is ever added) ---------------------------------
+build/
+dist/

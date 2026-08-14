@@ -35,7 +35,12 @@ def _call_gemini_sync(
             # multi-item lists, AND a full parallel Tagalog translation of
             # most of that content in the same JSON object — real-world
             # test showed it truncating mid-string before finishing.
-            max_output_tokens=4096,
+            # 4096 still truncated mid-string on some cases — a detailed
+            # visually-grounded justification + full bilingual translation
+            # of all guidance fields can genuinely need more than that.
+            # Going substantially higher this time rather than incrementing
+            # again after hitting the same symptom twice.
+            max_output_tokens=8192,
             response_mime_type="application/json",
         ),
     )

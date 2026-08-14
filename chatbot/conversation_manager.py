@@ -10,6 +10,7 @@ thesis-scale demo — it does NOT protect against session loss on
 restart/redeploy. Fine for a thesis demo; not appropriate at real scale.
 """
 import json
+import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -17,6 +18,8 @@ import google.generativeai as genai
 
 import config
 from pipeline.prompt_builder import SYSTEM_PROMPT
+
+logger = logging.getLogger(__name__)
 
 genai.configure(api_key=config.GEMINI_API_KEY)
 
@@ -102,7 +105,13 @@ def handle_chat_message(session_id: str, message: str, language: str = "english"
         )
         reply = response.text.strip()
         source = "gemini"
-    except Exception:
+    except Exception as exc:
+        # Same fix as offline_fallback.py's get_guidance() — this except
+        # was previously silent, which is exactly what caused a real
+        # Gemini quota failure here to look identical (in the Flask
+        # terminal) to a fully successful call, since the fallback still
+        # returns 200 with a valid reply. Logging it stops that ambiguity.
+        logger.warning("Gemini chat call failed, falling back to canned reply: %s", exc)
         reply = (
             "Sorry, I couldn't reach the guidance service right now. "
             "Please try again shortly, or consult your local DA extension officer."

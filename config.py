@@ -36,7 +36,7 @@ RETRIEVAL_K = 3
 
 # --- Diagnostic thresholds ----------------------------------------------------
 LOW_CONFIDENCE_THRESHOLD = 0.6  # below this, guidance opens with an extension-officer caveat
-GEMINI_TIMEOUT_SECONDS = 30  # 10s was too tight for 3 images + RAG context + long JSON output; falls back to offline guidance if exceeded
+GEMINI_TIMEOUT_SECONDS = 60  # 30s still timed out occasionally on the heaviest requests (3 images + long RAG context + full bilingual JSON output); falls back to offline guidance if exceeded
 
 # --- XAI method (deployed heatmap) ----------------------------------------------
 # evaluate_xai.py (training pipeline, separate codebase) benchmarks Grad-CAM,
