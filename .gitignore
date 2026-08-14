@@ -38,3 +38,5 @@ Thumbs.db
 # --- Build/dist (if packaging is ever added) ---------------------------------
 build/
 dist/
+
+test_*.py
