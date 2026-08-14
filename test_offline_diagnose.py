@@ -6,12 +6,20 @@ Usage:
     python test_offline_diagnose.py
 """
 import json
+import os
+
 import requests
+from dotenv import load_dotenv
 
 from sample_data.mock_student_output import get_mock_request_body
 
-# TODO: replace with the MAIZE_API_KEY value from your .env
-API_KEY = "11338b6aa6d9751bd9d54d69b78a14472ade0dad0051cfac443743945f357f27"
+# Reads MAIZE_API_KEY from .env (already gitignored) instead of hardcoding
+# it here — this file can now be safely committed to git without ever
+# containing the real key in its source text.
+load_dotenv()
+API_KEY = os.environ.get("MAIZE_API_KEY")
+if not API_KEY:
+    raise SystemExit("MAIZE_API_KEY not found in .env — set it there before running this script.")
 
 BASE_URL = "http://localhost:5000"
 
