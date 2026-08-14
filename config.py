@@ -20,7 +20,10 @@ OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")  # dev/eval only, never requir
 MAIZE_API_KEY = os.environ.get("MAIZE_API_KEY")  # shared key the Android app sends
 
 # --- Models ------------------------------------------------------------------
-GEMINI_MODEL = "gemini-2.5-flash"
+# gemini-2.5-flash is blocked for newly-created API keys as of ~Aug 2026,
+# ahead of its official Oct 16, 2026 shutdown — Google's recommended
+# replacement for new projects is gemini-3.5-flash.
+GEMINI_MODEL = "gemini-3.5-flash"
 GPT_COMPARISON_MODEL = "gpt-4o-mini"  # comparison-only, never called in the deployed app
 EMBEDDING_MODEL = "models/gemini-embedding-001"  # text-embedding-004 was shut down Jan 14, 2026
 
@@ -33,7 +36,7 @@ RETRIEVAL_K = 3
 
 # --- Diagnostic thresholds ----------------------------------------------------
 LOW_CONFIDENCE_THRESHOLD = 0.6  # below this, guidance opens with an extension-officer caveat
-GEMINI_TIMEOUT_SECONDS = 10  # falls back to offline guidance if exceeded
+GEMINI_TIMEOUT_SECONDS = 30  # 10s was too tight for 3 images + RAG context + long JSON output; falls back to offline guidance if exceeded
 
 # --- XAI method (deployed heatmap) ----------------------------------------------
 # evaluate_xai.py (training pipeline, separate codebase) benchmarks Grad-CAM,
@@ -64,7 +67,7 @@ XAI_METHOD_DISPLAY_NAME = XAI_METHOD_DISPLAY_NAMES.get(XAI_METHOD, XAI_METHOD)
 # together, they're separate codebases that don't auto-sync (same caveat
 # as XAI_METHOD above).
 STUDENT_IMG_SIZE = 224
-STUDENT_BEST_VARIANT = "mobilenet_v2_cbam"
+STUDENT_BEST_VARIANT = "mobilenet_v3_small"  # matches the checkpoint currently in use — update if you swap in a different trained variant
 STUDENT_FACTORY_MODE = "mode_b"
 STUDENT_DROPOUT = 0.3
 CBAM_SPATIAL_KERNEL = 7
@@ -76,7 +79,7 @@ CLASS_TO_IDX = {"HEALTHY": 0, "MSV": 1, "MLN": 2}
 # runtime or baked in via a build ARG (same leak risk as the Gemini key).
 STUDENT_CKPT_PATH = os.environ.get(
     "STUDENT_CKPT_PATH",
-    str(BASE_DIR / "student_model" / "checkpoints" /
+    str(BASE_DIR / "pipeline" / "student_model" / "checkpoints" /
         f"student_{STUDENT_BEST_VARIANT}_{STUDENT_FACTORY_MODE}_best.pth"),
 )
 
@@ -87,7 +90,18 @@ STUDENT_CKPT_PATH = os.environ.get(
 XAI_TARGET_LAYERS = {
     "mobilenet_v2": "encoder.features[-1][0]",
     "mobilenet_v2_cbam": "encoder.features[-1][0]",
-    "mobilenet_v3_small": "encoder.features[-1][0]",
+    # mobilenet_v3_small maps to smp's "tu-mobilenetv3_small_100" — a
+    # TIMM-based encoder (via smp's "tu-" prefix), not torchvision. It has
+    # no .features attribute; confirmed via direct inspection
+    # (inspect_encoder.py) that the real path is encoder.model.blocks[5][0]
+    # — the final ConvBnAct block (containing the last Conv2d) before
+    # pooling, analogous to what "features[-1][0]" targets on torchvision's
+    # mobilenet_v2.
+    "mobilenet_v3_small": "encoder.model.blocks[5][0]",
+    # NOT verified the same way — these were copied from the training
+    # pipeline's config.py and may have the same timm-attribute-path issue
+    # mobilenet_v3_small had. Run inspect_encoder.py with
+    # STUDENT_BEST_VARIANT set to one of these before trusting it.
     "efficientnet_b0": "encoder.blocks[-1][-1]",
     "efficientnet_b0_cbam": "encoder.blocks[-1][-1]",
 }

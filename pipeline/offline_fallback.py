@@ -3,9 +3,19 @@ Orchestrates the "try Gemini, fall back to static guidance" flow used by
 /diagnose. Falls back to offline guidance on explicit offline flag, on
 Gemini timeout/API error, or on Gemini response schema validation failure —
 all three treated identically so the farmer always gets actionable guidance.
+
+IMPORTANT: the real Gemini failure reason is logged here (not just
+swallowed) — the farmer-facing response never needs to show it, but
+silently falling back with no trace makes debugging genuine Gemini
+failures (bad API key, quota, malformed response) impossible to
+distinguish from an intentional offline request.
 """
+import logging
+
 from offline.static_guidance import OFFLINE_GUIDANCE
 from pipeline.gemini_engine import GeminiCallError, generate_guidance
+
+logger = logging.getLogger(__name__)
 
 
 def get_static_guidance(classification: str, monitoring_stage: int) -> dict:
@@ -50,5 +60,6 @@ def get_guidance(
             xai_image=xai_image,
         )
         return "gemini", result.model_dump()
-    except GeminiCallError:
+    except GeminiCallError as exc:
+        logger.warning("Gemini call failed, falling back to offline guidance: %s", exc)
         return "offline", get_static_guidance(classification, monitoring_stage)

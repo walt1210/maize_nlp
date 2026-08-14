@@ -31,7 +31,11 @@ def _call_gemini_sync(
         [prompt_text, original_image, segmentation_image, xai_image],
         generation_config=genai.GenerationConfig(
             temperature=0.2,
-            max_output_tokens=2000,
+            # 2000 was too tight: the response needs justification, several
+            # multi-item lists, AND a full parallel Tagalog translation of
+            # most of that content in the same JSON object — real-world
+            # test showed it truncating mid-string before finishing.
+            max_output_tokens=4096,
             response_mime_type="application/json",
         ),
     )

@@ -80,6 +80,31 @@ def _load_model() -> StudentModel:
     return model
 
 
+class _ClassificationOnlyWrapper(torch.nn.Module):
+    """
+    pytorch_grad_cam expects model(x) to return ONLY classification logits
+    as a [batch, num_classes] tensor. StudentModel.forward() returns a
+    3-tuple (seg_logits, cls_out, sev_out) since it's multi-task — passing
+    it directly caused ClassifierOutputTarget to index into the raw tuple
+    instead of a logits tensor, producing a non-scalar "loss" and the
+    error "grad can be implicitly created only for scalar outputs".
+
+    This wraps the real model to expose just cls_out. The target layer's
+    hooks still fire correctly during this wrapper's forward(), since
+    self.student_model is the SAME underlying module (not a copy) — the
+    layer being hooked (e.g. .unet.encoder.model.blocks[5][0]) executes
+    identically whether reached through the wrapper or the raw model.
+    """
+
+    def __init__(self, student_model: StudentModel):
+        super().__init__()
+        self.student_model = student_model
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        _seg_logits, cls_out, _sev_out = self.student_model(x)
+        return cls_out
+
+
 def _get_model_and_cam():
     global _model, _cam_wrapper
     if _model is None:
@@ -101,7 +126,8 @@ def _get_model_and_cam():
         cam_cls = cam_classes.get(config.XAI_METHOD)
         if cam_cls is None:
             raise XaiEngineError(f"Unknown XAI_METHOD in config.py: {config.XAI_METHOD}")
-        _cam_wrapper = cam_cls(model=_model, target_layers=[target_layer])
+        cam_target_model = _ClassificationOnlyWrapper(_model)
+        _cam_wrapper = cam_cls(model=cam_target_model, target_layers=[target_layer])
     return _model, _cam_wrapper
 
 
