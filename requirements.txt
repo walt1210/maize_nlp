@@ -28,3 +28,13 @@ segmentation-models-pytorch>=0.3.0
 timm>=0.9.0
 grad-cam>=1.5.0
 opencv-python-headless>=4.9.0
+
+# --- OCR for scanned PDFs (rag/ingest.py) --------------------------------------
+# pytesseract is just a Python wrapper — it calls out to the Tesseract OCR
+# engine, which is a SEPARATE PROGRAM you must install yourself, not
+# something `pip install` can provide. On Windows, download and run the
+# installer from: https://github.com/UB-Mannheim/tesseract/wiki
+# After installing, either add its install folder to your PATH, or set
+# pytesseract.pytesseract.tesseract_cmd to the full path of tesseract.exe
+# at the top of rag/ingest.py if it's not automatically found.
+pytesseract>=0.3.10

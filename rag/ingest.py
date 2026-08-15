@@ -24,6 +24,7 @@ has TWO separate quotas that matter here:
     Re-running later resumes from where it left off (see embed_and_persist).
 """
 import csv
+import os
 import re
 import sys
 import time
@@ -35,6 +36,19 @@ from langchain_core.documents import Document
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 import config
+
+# Points pytesseract directly at the Tesseract executable rather than
+# relying on it being on PATH — sidesteps the same class of "installed
+# but not found" PATH issue that came up with git-filter-repo earlier.
+# Covers the two common Windows install locations for the UB-Mannheim
+# installer; on Linux/Mac (e.g. the Cloud Run container), Tesseract isn't
+# installed at all in this project, so OCR silently no-ops there too —
+# this whole feature is a LOCAL, one-time ingestion step, never needed
+# at deploy time (rag/chroma_db/ is already built and bundled by then).
+_TESSERACT_WINDOWS_PATHS = [
+    r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+    r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+]
 
 # Free tier: 100 embed_content requests/minute (documented — actual
 # observed limit is often tighter in practice) AND 1000 requests/DAY.
@@ -48,11 +62,69 @@ MAX_RETRIES = 4
 DEFAULT_RETRY_WAIT_SECONDS = 30
 
 
+MIN_TEXT_LENGTH_BEFORE_OCR = 20  # below this, treat the page as scanned/image-only
+
+
+def _ocr_page(page, page_num: int, pdf_name: str) -> str:
+    """
+    Renders a page to an image and runs OCR on it — fallback for scanned
+    PDFs with no real text layer (page.get_text() returns nothing because
+    there's genuinely nothing to extract that way, not because of a bug).
+    Requires the Tesseract OCR engine installed as a SEPARATE PROGRAM on
+    the system, not just `pip install pytesseract` — see requirements.txt
+    comment for the install link.
+    """
+    try:
+        import pytesseract
+        from PIL import Image
+    except ImportError:
+        print(f"  [WARN] {pdf_name} p.{page_num}: pytesseract/Pillow not installed — "
+              f"skipping OCR, this page contributes nothing to the knowledge base.")
+        return ""
+
+    # Only search for the exe once per run, not on every single page —
+    # after the first page sets tesseract_cmd, this check short-circuits.
+    if not pytesseract.pytesseract.tesseract_cmd or pytesseract.pytesseract.tesseract_cmd == "tesseract":
+        for candidate in _TESSERACT_WINDOWS_PATHS:
+            if os.path.exists(candidate):
+                pytesseract.pytesseract.tesseract_cmd = candidate
+                break
+
+    pix = page.get_pixmap(dpi=300)  # higher DPI = better OCR accuracy, but slower
+    mode = "RGBA" if pix.alpha else "RGB"
+    img = Image.frombytes(mode, (pix.width, pix.height), pix.samples)
+    if mode == "RGBA":
+        img = img.convert("RGB")
+
+    try:
+        text = pytesseract.image_to_string(img).strip()
+        if text:
+            print(f"  {pdf_name} p.{page_num}: OCR'd ({len(text)} chars)")
+        return text
+    except pytesseract.TesseractNotFoundError:
+        print(f"  [WARN] {pdf_name} p.{page_num}: Tesseract OCR engine not found on "
+              f"this system. pytesseract is just a Python wrapper — the actual OCR "
+              f"engine is a separate program you install once. See requirements.txt "
+              f"for the install link. Skipping OCR for this page.")
+        return ""
+
+
 def load_pdf_as_documents(pdf_path) -> list[Document]:
     docs = []
     with fitz.open(pdf_path) as pdf:
         for page_num, page in enumerate(pdf, start=1):
             text = page.get_text().strip()
+            if len(text) < MIN_TEXT_LENGTH_BEFORE_OCR:
+                # Only REPLACE if OCR actually produced something better —
+                # a failed/unavailable OCR attempt must never discard
+                # legitimate short text that was already successfully
+                # extracted (a caption, a brief label, etc.). Overwriting
+                # unconditionally here was a real bug: it silently wiped
+                # out content on pages that had short-but-real text,
+                # whenever Tesseract wasn't available.
+                ocr_text = _ocr_page(page, page_num, pdf_path.stem)
+                if ocr_text:
+                    text = ocr_text
             if text:
                 docs.append(
                     Document(
