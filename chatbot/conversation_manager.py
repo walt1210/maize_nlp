@@ -9,6 +9,7 @@ cloudbuild.yaml specifically to work around the first issue for a
 thesis-scale demo — it does NOT protect against session loss on
 restart/redeploy. Fine for a thesis demo; not appropriate at real scale.
 """
+import concurrent.futures
 import json
 import logging
 import uuid
@@ -17,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 import google.generativeai as genai
 
 import config
-from pipeline.prompt_builder import SYSTEM_PROMPT
+from pipeline.prompt_builder import CHAT_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,41 @@ maize streak diseases (MSV, MLN). Respond with plain text only, no JSON.
 """
 
 
+class ChatTruncatedError(Exception):
+    """Raised when Gemini's chat reply was cut off by max_output_tokens
+    instead of finishing naturally — never serve a truncated mid-sentence
+    reply to the farmer as if it were complete."""
+
+
+def _call_gemini_chat_sync(model, prompt: str) -> str:
+    response = model.generate_content(
+        prompt,
+        # 800, then 1200, both still truncated mid-sentence on real
+        # responses (confirmed on both English and Tagalog replies).
+        # Going more generous this time rather than incrementing again —
+        # cost is no longer a real constraint now that billing is enabled.
+        # 2048 fixed English replies but Tagalog still truncated mid-word —
+        # most tokenizers (including Gemini's) are trained predominantly
+        # on English, so non-English output typically costs more tokens
+        # per unit of actual content. Same budget, uneven headroom by
+        # language — going higher to cover both comfortably.
+        generation_config=genai.GenerationConfig(temperature=0.3, max_output_tokens=3500),
+    )
+
+    # Unlike /diagnose, this response is never JSON-parsed, so a truncated
+    # reply wouldn't fail on its own — it would just silently ship a
+    # cut-off sentence to the farmer as if it were a complete, successful
+    # answer. Checking finish_reason explicitly closes that gap.
+    try:
+        finish_reason = response.candidates[0].finish_reason
+        if finish_reason is not None and finish_reason.name == "MAX_TOKENS":
+            raise ChatTruncatedError("Gemini chat reply was truncated (hit max_output_tokens)")
+    except (AttributeError, IndexError):
+        pass  # response shape unexpected — don't fail a diagnostic check itself
+
+    return response.text.strip()
+
+
 def handle_chat_message(session_id: str, message: str, language: str = "english") -> dict:
     session = get_session(session_id)
     if session is None:
@@ -97,13 +133,17 @@ def handle_chat_message(session_id: str, message: str, language: str = "english"
         return {"status": "success", "source": "offline", "reply": reply, "session_id": session_id}
 
     prompt = _build_chat_prompt(session, message, language)
-    model = genai.GenerativeModel(config.GEMINI_MODEL, system_instruction=SYSTEM_PROMPT)
+    model = genai.GenerativeModel(config.GEMINI_MODEL, system_instruction=CHAT_SYSTEM_PROMPT)
     try:
-        response = model.generate_content(
-            prompt,
-            generation_config=genai.GenerationConfig(temperature=0.3, max_output_tokens=800),
-        )
-        reply = response.text.strip()
+        # Same enforced-timeout pattern as gemini_engine.py's
+        # generate_guidance() — without this, a slow/hung Gemini call had
+        # NO server-side deadline at all, so Flask would wait indefinitely
+        # and the only thing that ever gave up was the Android client's
+        # own socket timeout, surfacing as a raw exception instead of the
+        # graceful canned-reply fallback below.
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(_call_gemini_chat_sync, model, prompt)
+            reply = future.result(timeout=config.GEMINI_TIMEOUT_SECONDS)
         source = "gemini"
     except Exception as exc:
         # Same fix as offline_fallback.py's get_guidance() — this except

@@ -3,10 +3,14 @@ Retrieval layer: queries the pre-built ChromaDB knowledge base for the
 top-K chunks relevant to a given diagnosis. Read-only at runtime — the
 DB itself is built offline by rag/ingest.py and baked into the Docker image.
 """
+import logging
+
 from langchain_chroma import Chroma
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 import config
+
+logger = logging.getLogger(__name__)
 
 _vectorstore = None  # lazy-initialized singleton, one embedding client per process
 
@@ -34,13 +38,29 @@ def build_rag_query(classification: str, severity_pct: float, cimmyt_grade: int)
 
 
 def retrieve_context(classification: str, severity_pct: float, cimmyt_grade: int):
-    """Returns (rag_context: str, rag_sources: list[str])."""
+    """
+    Returns (rag_context: str, rag_sources: list[str]).
+
+    Retrieval itself calls the embedding API at query time (not just
+    during ingestion) — so it's exposed to the exact same failure modes
+    as Gemini generation (quota, billing, network). Every other
+    Gemini-dependent step in this pipeline degrades gracefully; this one
+    didn't, and a real embedding-quota failure crashed /diagnose entirely
+    with an unhandled 500 instead of falling back. An empty rag_context
+    is already safe downstream — build_cot_prompt() substitutes
+    "No specific retrieved context available." for it — so falling back
+    to that is a real degradation, not a silent correctness issue.
+    """
     if classification == "HEALTHY":
         return "No disease detected — no management protocol required.", []
 
     query = build_rag_query(classification, severity_pct, cimmyt_grade)
-    store = _get_vectorstore()
-    results = store.similarity_search(query, k=config.RETRIEVAL_K)
+    try:
+        store = _get_vectorstore()
+        results = store.similarity_search(query, k=config.RETRIEVAL_K)
+    except Exception as exc:
+        logger.warning("RAG retrieval failed, continuing without retrieved context: %s", exc)
+        return "", []
 
     if not results:
         return "", []

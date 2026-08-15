@@ -172,7 +172,27 @@ def diagnose():
         response["tagalog"] = guidance["tagalog"]
 
     # Start a chatbot session seeded with this diagnosis for follow-up Q&A.
-    session_id = conversation_manager.create_session(response, language=body.get("language", "english"))
+    # Deliberately NOT passing the raw `response` dict — it can contain
+    # two full base64-encoded PNG overlay images (when source == "gemini"),
+    # and conversation_manager stores this and RE-SENDS it as text on
+    # EVERY single chat turn. The chat model can't interpret raw base64
+    # as an image that way anyway — it's pure wasted input tokens,
+    # multiplied by every message in a conversation. Only the fields the
+    # chat model actually needs to continue the conversation intelligently
+    # go into chat memory; images and tagalog (re-derivable on request via
+    # the language toggle) are excluded.
+    chat_context = {
+        "classification": response["classification"],
+        "confidence": response["confidence"],
+        "low_confidence": response["low_confidence"],
+        "severity_pct": response["severity_pct"],
+        "cimmyt_grade": response["cimmyt_grade"],
+        "monitoring_stage": response["monitoring_stage"],
+        "diagnosis": response["diagnosis"],
+        "guidance": response["guidance"],
+        "protocol": response["protocol"],
+    }
+    session_id = conversation_manager.create_session(chat_context, language=body.get("language", "english"))
     response["session_id"] = session_id
 
     return jsonify(response)
@@ -217,4 +237,12 @@ def translate():
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    # threaded=True: without this, Flask's dev server processes requests
+    # ONE AT A TIME — if a second request comes in while a slow /chat or
+    # /diagnose call is still in flight, it queues behind it rather than
+    # running concurrently, which can make total wait time exceed even a
+    # generous client-side timeout. debug=True also gives auto-reload on
+    # file changes, which `flask run` (the command used previously) does
+    # NOT do by default — use `python app.py` instead of `flask run` to
+    # actually get both of these.
+    app.run(host="0.0.0.0", port=5000, debug=True, threaded=True)

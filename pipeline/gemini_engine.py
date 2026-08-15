@@ -5,6 +5,7 @@ so the caller (offline_fallback.get_guidance) can decide what to do next —
 this module never silently falls back on its own.
 """
 import concurrent.futures
+import logging
 
 import google.generativeai as genai
 from PIL import Image
@@ -15,9 +16,32 @@ from pipeline.response_validator import GeminiGuidanceResponse, validate_gemini_
 
 genai.configure(api_key=config.GEMINI_API_KEY)
 
+logger = logging.getLogger(__name__)
+
 
 class GeminiCallError(Exception):
     """Raised on timeout, API error, or response validation failure."""
+
+
+def _log_if_truncated(response, context: str) -> None:
+    """
+    Checks finish_reason and logs clearly if the response was cut off by
+    hitting max_output_tokens, rather than finishing naturally. This
+    doesn't change behavior here — a truncated /diagnose response still
+    fails JSON parsing downstream and triggers the normal offline
+    fallback either way — it just replaces a generic "Unterminated
+    string..." parse error with an unambiguous root cause in the logs.
+    """
+    try:
+        finish_reason = response.candidates[0].finish_reason
+        if finish_reason is not None and finish_reason.name == "MAX_TOKENS":
+            logger.warning(
+                "%s: Gemini response was TRUNCATED (hit max_output_tokens) — "
+                "not a natural stop. Consider raising the token budget further.",
+                context,
+            )
+    except (AttributeError, IndexError):
+        pass  # response shape unexpected — not worth failing over a diagnostic check
 
 
 def _call_gemini_sync(
@@ -44,6 +68,7 @@ def _call_gemini_sync(
             response_mime_type="application/json",
         ),
     )
+    _log_if_truncated(response, context="/diagnose")
     return response.text
 
 
