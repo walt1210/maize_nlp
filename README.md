@@ -1,132 +1,343 @@
-# MAIze NLP Pipeline
+# MAIze — NLP Backend
 
-Flask backend that turns MAIze Student model outputs (on-device, TFLite)
-into RAG-grounded, bilingual (EN/Tagalog) agricultural guidance via Gemini
-2.5 Flash. See `MAIZE_NLP_BLUEPRINT.md` for full architecture background.
+Flask backend for the MAIze maize disease diagnosis app. Given an on-device
+classification result (from the Android app's TFLite Student model), this
+service generates server-side XAI overlay images and RAG-grounded diagnostic
+guidance via Gemini, with a static offline fallback if Gemini is unreachable.
 
-## Decisions baked into this codebase
+**Team:** Altes, Davis, Tayer, Ursua — AUF BSCS 3-A thesis.
+**Adviser:** Ms. Melissa M. Pantig.
 
-- **Student model runs on-device (Android/TFLite).** Flask never touches
-  the vision model — it only receives `classification`, `confidence`,
-  `severity_pct`, `cimmyt_grade`, and the two base64 images.
-- **No `xai_description` text field.** Gemini reasons directly from the
-  two attached images (original + Grad-CAM++ overlay). No masks/heatmap
-  arrays are sent to the backend.
-- **Low-confidence caveat at `confidence < 0.6`** (`config.LOW_CONFIDENCE_THRESHOLD`).
-  Below this, the prompt instructs Gemini to open with an
-  extension-officer-consultation caveat; the API response also carries
-  a `low_confidence: bool` flag.
-- **RAGAS is offline-only** (`evaluation/ragas_eval.py`), never computed
-  per live request — it makes its own LLM calls internally, so scoring
-  every farmer's scan would double latency/cost for no runtime benefit.
-- **`/diagnose`, `/chat`, `/translate` all require an `X-API-Key` header**
-  matching `MAIZE_API_KEY`, since Cloud Run is deployed with
-  `--allow-unauthenticated`.
-- **Chatbot sessions are in-memory**, and Cloud Run is deployed with
-  `--max-instances=1` to work around the lack of cross-instance session
-  affinity. This is a thesis-scope workaround, not a production pattern —
-  see the comment at the top of `chatbot/conversation_manager.py`.
+---
+
+## Architecture
+
+```
+Android app (on-device TFLite)
+        │  classification, confidence, severity_pct, original photo
+        ▼
+   POST /diagnose ──────────────────────────────────────────┐
+        │                                                     │
+        ├─► XAI overlay generation (pipeline/xai_engine.py)   │
+        │   Full PyTorch checkpoint, server-side —            │
+        │   TFLite can't run gradient-based XAI (Grad-CAM++)  │
+        │                                                     │
+        ├─► RAG retrieval (pipeline/rag_engine.py)            │
+        │   ChromaDB knowledge base, top-K relevant passages  │
+        │                                                     │
+        └─► Guidance generation                                │
+            ├─ Try: Gemini (3-image CoT prompt) ───────────────┤
+            └─ Fail/offline: static bilingual guidance ────────┘
+                (offline/static_guidance.py — always works,
+                 no network/API dependency)
+```
+
+`/chat` is a separate, session-based endpoint for follow-up questions about
+one specific diagnosis — grounded in that diagnosis's context, not a
+general-purpose assistant.
+
+---
+
+## Prerequisites
+
+- Python 3.10+ (developed/tested on a recent 3.x)
+- A Google AI Studio account with billing enabled (free tier is too limited
+  for real development — see **Cost Notes** below)
+- An OpenAI account (only needed to run `evaluation/ragas_eval.py` — not
+  required for the app itself)
+- [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki) — only
+  needed if re-running knowledge base ingestion with scanned/image-based
+  source PDFs
+
+---
 
 ## Setup
 
+### 1. Clone and create a virtual environment
+
 ```bash
-# 1. Create and activate a virtual environment
 python -m venv venv
-source venv/bin/activate          # Windows: venv\Scripts\activate
+venv\Scripts\activate        # Windows
+source venv/bin/activate     # macOS/Linux
+pip install -r requirements.txt --break-system-packages
+```
 
-# 2. Install dependencies
-pip install -r requirements.txt
+### 2. Set up your `.env` file
 
-# 3. Configure environment variables
-cp .env.example .env
-# Edit .env: set GEMINI_API_KEY, OPENAI_API_KEY (dev only), MAIZE_API_KEY
+Copy `.env.example` to `.env` and fill in:
 
-# 4. Add PDF knowledge base documents
-# Place PDFs in rag/knowledge_base/ (see blueprint Section 9 for the list)
+```
+GEMINI_API_KEY=your_key_here
+MAIZE_API_KEY=your_generated_key_here
+```
 
-# 5. Ingest the knowledge base (run once, or after adding/updating PDFs)
+Generate a `MAIZE_API_KEY` yourself (this is a shared app-level secret you
+invent, not issued by anyone):
+
+```bash
+python -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Optional — only needed to run `evaluation/ragas_eval.py`:
+
+```
+OPENAI_API_KEY=your_openai_key_here
+```
+
+(Not required for the app itself — RAGAS's Gemini-as-judge path was tried
+and abandoned due to an unresolved `ragas`/`instructor` compatibility bug;
+see **Evaluation** below.)
+
+**Never commit `.env`** — it's gitignored, and should stay that way.
+
+### 3. Place the trained model checkpoint
+
+The Student model checkpoint (`.pth`) is **not** in this repo (too large for
+git). Place it at:
+
+```
+pipeline/student_model/checkpoints/student_mobilenet_v3_small_mode_b_best.pth
+```
+
+Ask a teammate for the file, or regenerate it from the training pipeline.
+
+### 4. Place the knowledge base source documents
+
+PDFs/CSVs in `rag/knowledge_base/` are **not** in this repo — most are
+copyrighted material (CIMMYT manuals, journal articles) that isn't ours to
+redistribute. See the citations in this README's References section (or ask
+a teammate) to source them independently, then place them in
+`rag/knowledge_base/`.
+
+### 5. Build the knowledge base
+
+```bash
 python -m rag.ingest
-# This must be run LOCALLY, before building the Docker image — see the
-# comment at the top of Dockerfile for why.
+```
 
-# 6. Run locally
-export $(cat .env | xargs)        # or use python-dotenv / your IDE's env loader
-flask run --port 5000
+This is resumable — safe to re-run after adding new documents; it skips
+chunks already embedded. If a source PDF is scanned/image-based (no text
+layer), this step needs Tesseract OCR installed (see Prerequisites) or that
+document will silently contribute 0 chunks.
 
-# 7. Run tests
+### 6. Run the server
+
+```bash
+python app.py
+```
+
+**Use this, not `flask run`** — `flask run` doesn't pick up `threaded=True`
+and `debug=True` from the `app.run(...)` call in `app.py`, which matters:
+without threading, concurrent requests queue behind each other instead of
+running in parallel, which can cause client-side timeouts on requests the
+server was still legitimately processing.
+
+The server listens on `0.0.0.0:5000` by default — reachable from an Android
+emulator at `10.0.2.2:5000`, or from a physical device on the same network
+via your machine's LAN IP (shown in the startup log).
+
+**Windows Firewall:** the first time you run this, Windows may prompt to
+allow the connection — allow it on both Private and Public networks, or
+requests from the emulator/other devices will silently fail to connect at
+all (no error, no log line — just nothing happens).
+
+---
+
+## API Endpoints
+
+### `POST /diagnose`
+**Header:** `X-API-Key: <MAIZE_API_KEY>`
+
+```json
+{
+  "classification": "MSV",
+  "confidence": 0.923,
+  "severity_pct": 31.4,
+  "original_image_b64": "<base64 original photo>",
+  "language": "english",
+  "include_tagalog": false,
+  "offline": false
+}
+```
+
+Does **not** accept `cimmyt_grade`, `segmentation_overlay_b64`, or
+`xai_overlay_b64` — all computed/generated server-side. `include_tagalog`
+defaults to `false` (see Cost Notes — this was a deliberate cost fix,
+verified end-to-end through the full call chain from the Android client
+down to the response schema).
+
+Response includes `diagnosis`, `guidance`, `protocol`, `overlays` (when
+`source: "gemini"`), `rag_sources`, `session_id`, and `tagalog` (only when
+explicitly requested).
+
+### `POST /chat`
+**Header:** `X-API-Key: <MAIZE_API_KEY>`
+
+```json
+{
+  "session_id": "<from a prior /diagnose response>",
+  "message": "What should I do first?",
+  "language": "english"
+}
+```
+
+### `GET /health`
+No auth required. Returns `{"model": "...", "status": "ok"}`.
+
+---
+
+## Testing
+
+```bash
 pytest tests/ -v
-
-# 8. Smoke-test the /diagnose endpoint with mock data
-python -c "
-import requests
-from sample_data.mock_student_output import get_mock_request_body
-body = get_mock_request_body('msv_moderate')
-r = requests.post('http://localhost:5000/diagnose', json=body,
-                   headers={'X-API-Key': 'your_maize_api_key_here'})
-print(r.status_code, r.json())
-"
 ```
 
-## Deploy to Cloud Run
+21 tests covering offline guidance completeness, severity/grade computation,
+input validation, RAG query construction, and response schema validation
+(including the English-only default path — no `tagalog` field present).
+Does **not** cover live Gemini calls (those require real API credits) —
+see `test_api_model.py` (quick model-connectivity check), and
+`manual_diagnose_check.py` / `manual_chat_translate_check.py` (fuller
+manual, credit-consuming integration tests exercising `/diagnose`,
+`/chat`, and `/translate` against a locally running server). These last
+two are deliberately named outside pytest's `test_*.py` discovery pattern
+— they were originally named `test_*.py` and got accidentally collected
+and executed by a bare `pytest`/`python -m pytest` run from the project
+root, which is exactly why `pytest tests/ -v` (scoped to `tests/` only)
+is the recommended command above.
+
+---
+
+## Evaluation (RAGAS)
+
+`evaluation/ragas_eval.py` scores the RAG+generation pipeline on:
+- **Faithfulness** — are `immediate_actions`/`management` recommendations
+  actually grounded in retrieved knowledge base content?
+- **Answer Relevancy** — does the response address a natural,
+  farmer-phrased question about the diagnosis?
 
 ```bash
-# Make sure rag/chroma_db/ exists (step 5 above) before building.
-docker build -t maize-nlp .
-
-# Push and deploy (or use cloudbuild.yaml with `gcloud builds submit`)
-gcloud builds submit --config=cloudbuild.yaml
-
-# Store secrets first, if you haven't:
-echo -n "your_gemini_key" | gcloud secrets create gemini-api-key --data-file=-
-echo -n "your_maize_key"  | gcloud secrets create maize-api-key  --data-file=-
-```
-
-## Offline evaluation (for the thesis results chapter)
-
-```bash
-# RAGAS faithfulness + answer relevancy over 30 synthetic cases
 python -m evaluation.ragas_eval
-
-# chrF score over an expert-validated Tagalog reference set
-python -m evaluation.chrf_eval path/to/tagalog_eval_set.csv
 ```
 
-## Project structure
+Needs `OPENAI_API_KEY` in `.env` (used as the LLM judge — a genuine
+Google/`ragas`/`instructor` compatibility bug made a same-billing
+Gemini-as-judge approach unworkable; see the file's own inline comments
+for the exact contradiction found) and a real Student checkpoint (see
+Setup step 3). Generated test cases are cached locally
+(`ragas_eval_generation_cache_n{N}_k{RETRIEVAL_K}.json`, gitignored) so
+re-running to iterate on scoring logic doesn't re-pay for Gemini
+generation — delete the relevant cache file to force fresh generations.
+Set `RAGAS_EVAL_N_PER_CLASS=1` before running for a cheap ~10%-size
+sanity check before committing to a full paid run.
+
+**Final documented result** (`RETRIEVAL_K=5`, averaged across 2 runs due
+to observed run-to-run variance from non-deterministic generation — see
+`evaluation/ragas_eval_final_summary_k5.md` for full methodology, known
+limitations, and per-run detail):
+
+| Metric | Score |
+|---|---|
+| Faithfulness | 0.353 |
+| Answer Relevancy | 0.490 |
+
+`RETRIEVAL_K` was raised from 3 to 5 based on this evaluation — faithfulness
+roughly doubled (more retrieved context to verify claims against) at a
+small cost to relevancy (richer context → slightly less narrowly-targeted
+answers). A follow-up prompt change asking for more concise action items
+was tested to try to recover the relevancy cost, but was reverted after it
+collapsed faithfulness instead — documented in the final summary as a
+real, informative negative result, not silently discarded.
+
+---
+
+## Known Limitations
+
+- **In-memory chat sessions** — not backed by a shared store (Redis, etc.).
+  Cloud Run gives no guarantee that two requests for the same `session_id`
+  land on the same container instance. `cloudbuild.yaml` pins
+  `--max-instances=1` to work around this for thesis-scale demo use. This
+  does **not** protect against session loss on container restart/redeploy.
+  Not appropriate at real scale.
+- **RAGAS's Gemini/`google.genai` provider path is broken** in the
+  currently pinned `ragas==0.4.3` + `instructor` combination — confirmed
+  via direct testing: `.ascore()` requires an async-capable client
+  (`"Cannot use agenerate() with a synchronous client"`), while
+  `instructor.from_genai()` (used internally by `llm_factory` for
+  `provider="google"`) explicitly rejects anything that isn't a plain
+  sync `google.genai.Client`. Neither client type satisfies both layers.
+  `evaluation/ragas_eval.py` judges with OpenAI instead — see
+  **Evaluation** above. Revisit if a future `ragas`/`instructor` release
+  fixes this, since it would allow judging on the same Gemini billing
+  account used for generation.
+- **No spend cap currently set** in Google AI Studio — nothing prevents a
+  runaway cost spike. Set one under Billing → "Set spend cap".
+
+---
+
+## Cost Notes
+
+Real-world spend during heavy development: roughly $10-11+ for one day of
+active testing/debugging, using `gemini-3.5-flash` ($1.50/M input tokens,
+**$9/M output tokens** — and Gemini 3.x's internal "thinking" tokens are
+billed at the output rate too, which the Chain-of-Thought prompt design
+triggers a lot of).
+
+For local/dev work, set `GEMINI_DEV_MODE=1` in `.env` to route
+`/diagnose` calls through `gemini-3.5-flash-lite` instead (~5x cheaper) —
+see `config.py`'s `GEMINI_MODEL_LITE`/`GEMINI_DEV_MODE`. **Never set this
+in production** — real farmer-facing diagnoses should stay on the full
+model (`generate_guidance()` also accepts an explicit `use_lite_model`
+override per call, independent of this env var, for callers like
+evaluation scripts that need to choose deliberately).
+
+**Set a spend cap** in Google AI Studio (Billing page → "Set spend cap") if
+you haven't — nothing currently prevents a runaway cost spike otherwise.
+(Still true as of this writing — see Known Limitations.)
+
+`include_tagalog` defaults to `false` specifically to reduce cost — a full
+parallel Tagalog translation was previously generated on every single call
+regardless of whether it was used, roughly doubling relevant output content
+for no benefit when unused. This is verified end-to-end (Android client →
+Flask → `gemini_engine.py` → `prompt_builder.py` → `response_validator.py`)
+as of this README's last update — earlier versions of this fix looked
+complete but had gaps at several points in that chain.
+
+---
+
+## Deployment
+
+`Dockerfile` and `cloudbuild.yaml` are set up for Google Cloud Run (4Gi
+memory, 2 CPU — needed for the PyTorch XAI checkpoint). Verify the
+checkpoint and `chroma_db/` are present before building; the Dockerfile
+checks for both.
+
+---
+
+## Project Structure
 
 ```
 maize_nlp/
-├── app.py                        Flask entry point, all endpoints
-├── config.py                     All settings, thresholds, model names
+├── app.py                  # Flask routes
+├── config.py                # Model names, timeouts, token budgets, severity brackets
 ├── pipeline/
-│   ├── input_processor.py        Image decode/validate, staging, confidence
-│   ├── rag_engine.py             ChromaDB retrieval
-│   ├── prompt_builder.py         System prompt + CoT prompt construction
-│   ├── gemini_engine.py          Gemini API call, timeout, validation
-│   ├── response_validator.py     Pydantic schema for Gemini's JSON output
-│   ├── tagalog_handler.py        On-demand translation
-│   └── offline_fallback.py       Gemini→offline orchestration
-├── rag/
-│   ├── ingest.py                 Run locally to build chroma_db/
-│   └── knowledge_base/           Put PDFs here
-├── offline/
-│   └── static_guidance.py        12 pre-generated fallback entries
+│   ├── gemini_engine.py     # Gemini API call (google.genai) + timeout handling
+│   ├── offline_fallback.py  # Try Gemini → fall back to static guidance
+│   ├── rag_engine.py        # ChromaDB retrieval
+│   ├── prompt_builder.py    # System + Chain-of-Thought prompts
+│   ├── xai_engine.py        # Server-side overlay generation (PyTorch)
+│   ├── response_validator.py # Pydantic schema for Gemini's JSON output
+│   ├── input_processor.py   # Image prep, severity→grade computation
+│   └── student_model/       # Vendored model architecture + checkpoint
 ├── chatbot/
-│   └── conversation_manager.py   Session store, out-of-scope detection
+│   └── conversation_manager.py  # /chat session logic (google.genai)
+├── rag/
+│   ├── ingest.py             # Knowledge base builder
+│   └── knowledge_base/       # Source PDFs/CSVs (not in repo — see Setup)
+├── offline/
+│   └── static_guidance.py    # 12 offline fallback entries (bilingual)
 ├── evaluation/
-│   ├── ragas_eval.py             Offline RAGAS batch scoring
-│   ├── chrf_eval.py              Offline chrF scoring
-│   └── expert_audit_template.csv
-├── sample_data/
-│   └── mock_student_output.py    Test fixtures, no trained model needed
-└── tests/
+│   ├── ragas_eval.py         # RAGAS faithfulness/answer_relevancy scoring
+│   └── ragas_eval_final_summary_k5.md  # Documented final results
+└── tests/                    # pytest suite (21 tests)
 ```
-
-## Still needed before full implementation
-
-See `MAIZE_NLP_BLUEPRINT.md` Section 20 for the original list (API keys,
-knowledge base PDFs, expert Tagalog validator, trained Student model,
-Android integration). One addition: the **offline guidance content in
-`offline/static_guidance.py` is a reasonable draft, not expert-reviewed**
-— have a licensed agriculturist check it against `evaluation/expert_audit_template.csv`
-criteria before treating it as safe to ship, since it's what farmers see
-whenever Gemini is unreachable.
