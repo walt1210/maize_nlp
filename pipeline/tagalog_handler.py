@@ -2,12 +2,17 @@
 On-demand Tagalog translation (POST /translate) and chrF scoring against
 an expert-validated reference, used both at eval time and for spot-checks.
 """
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from sacrebleu.metrics import CHRF
 
 import config
 
-genai.configure(api_key=config.GEMINI_API_KEY)
+# Migrated from google.generativeai (deprecated, all support ended) to
+# google.genai. The old SDK's module-level genai.configure(api_key=...)
+# + genai.GenerativeModel(...) pattern is replaced by an explicit Client
+# instance, reused across calls rather than constructed per-request.
+_client = genai.Client(api_key=config.GEMINI_API_KEY)
 
 _TRANSLATE_PROMPT = """\
 Translate the following agricultural guidance text into natural, accurate
@@ -23,11 +28,11 @@ Respond with ONLY the Tagalog translation, no preamble, no quotation marks.
 
 
 def translate_text(text: str, context: str = "") -> str:
-    model = genai.GenerativeModel(config.GEMINI_MODEL)
     prompt = _TRANSLATE_PROMPT.format(context=context or "General maize disease guidance", text=text)
-    response = model.generate_content(
-        prompt,
-        generation_config=genai.GenerationConfig(temperature=0.2, max_output_tokens=1000),
+    response = _client.models.generate_content(
+        model=config.GEMINI_MODEL,
+        contents=prompt,
+        config=types.GenerateContentConfig(temperature=0.2, max_output_tokens=1000),
     )
     return response.text.strip()
 

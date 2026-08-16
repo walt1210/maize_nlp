@@ -15,14 +15,20 @@ import logging
 import uuid
 from datetime import datetime, timedelta, timezone
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 
 import config
 from pipeline.prompt_builder import CHAT_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
-genai.configure(api_key=config.GEMINI_API_KEY)
+# Migrated from google.generativeai (deprecated, all support ended) to
+# google.genai. The old SDK bound system_instruction to a GenerativeModel
+# object constructed per-call; the new SDK has no equivalent object —
+# system_instruction is just another field on the per-call config passed
+# to client.models.generate_content() (see _call_gemini_chat_sync below).
+_client = genai.Client(api_key=config.GEMINI_API_KEY)
 
 _sessions: dict[str, dict] = {}
 
@@ -91,19 +97,28 @@ class ChatTruncatedError(Exception):
     reply to the farmer as if it were complete."""
 
 
-def _call_gemini_chat_sync(model, prompt: str) -> str:
-    response = model.generate_content(
-        prompt,
-        # 800, then 1200, both still truncated mid-sentence on real
-        # responses (confirmed on both English and Tagalog replies).
-        # Going more generous this time rather than incrementing again —
-        # cost is no longer a real constraint now that billing is enabled.
-        # 2048 fixed English replies but Tagalog still truncated mid-word —
-        # most tokenizers (including Gemini's) are trained predominantly
-        # on English, so non-English output typically costs more tokens
-        # per unit of actual content. Same budget, uneven headroom by
-        # language — going higher to cover both comfortably.
-        generation_config=genai.GenerationConfig(temperature=0.3, max_output_tokens=3500),
+def _call_gemini_chat_sync(prompt: str) -> str:
+    response = _client.models.generate_content(
+        model=config.GEMINI_MODEL,
+        contents=prompt,
+        config=types.GenerateContentConfig(
+            system_instruction=CHAT_SYSTEM_PROMPT,
+            temperature=0.3,
+            # 800, then 1200, both still truncated mid-sentence on real
+            # responses (confirmed on both English and Tagalog replies).
+            # Going more generous this time rather than incrementing again —
+            # cost is no longer a real constraint now that billing is enabled.
+            # 2048 fixed English replies but Tagalog still truncated mid-word —
+            # most tokenizers (including Gemini's) are trained predominantly
+            # on English, so non-English output typically costs more tokens
+            # per unit of actual content. Same budget, uneven headroom by
+            # language — going higher to cover both comfortably. Was
+            # hardcoded here directly; now centralized in
+            # config.GEMINI_CHAT_MAX_OUTPUT_TOKENS (separate from
+            # /diagnose's budget — see config.py for why they're not
+            # shared), so it can be tuned without touching this file.
+            max_output_tokens=config.GEMINI_CHAT_MAX_OUTPUT_TOKENS,
+        ),
     )
 
     # Unlike /diagnose, this response is never JSON-parsed, so a truncated
@@ -133,7 +148,6 @@ def handle_chat_message(session_id: str, message: str, language: str = "english"
         return {"status": "success", "source": "offline", "reply": reply, "session_id": session_id}
 
     prompt = _build_chat_prompt(session, message, language)
-    model = genai.GenerativeModel(config.GEMINI_MODEL, system_instruction=CHAT_SYSTEM_PROMPT)
     try:
         # Same enforced-timeout pattern as gemini_engine.py's
         # generate_guidance() — without this, a slow/hung Gemini call had
@@ -142,7 +156,7 @@ def handle_chat_message(session_id: str, message: str, language: str = "english"
         # own socket timeout, surfacing as a raw exception instead of the
         # graceful canned-reply fallback below.
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(_call_gemini_chat_sync, model, prompt)
+            future = executor.submit(_call_gemini_chat_sync, prompt)
             reply = future.result(timeout=config.GEMINI_TIMEOUT_SECONDS)
         source = "gemini"
     except Exception as exc:

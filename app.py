@@ -72,7 +72,13 @@ def diagnose():
     except (KeyError, TypeError, ValueError) as exc:
         return jsonify({"status": "error", "error": f"missing or invalid field: {exc}"}), 400
 
-    include_tagalog = bool(body.get("include_tagalog", True))
+    # Was default=True — meant any caller that omitted this field (a
+    # curl test, a future integration, anything other than the current
+    # Android client) silently got the expensive full bilingual
+    # generation path. Android already always sends this field explicitly
+    # (defaulting to false itself — see MaizeApiClient.kt), so this only
+    # changes behavior for callers that don't specify it.
+    include_tagalog = bool(body.get("include_tagalog", False))
     force_offline = bool(body.get("offline", False))
 
     try:
@@ -118,6 +124,7 @@ def diagnose():
         original_image=original_image,
         segmentation_image=input_processor.resize_for_gemini(segmentation_image) if segmentation_image else None,
         xai_image=input_processor.resize_for_gemini(xai_image) if xai_image else None,
+        include_tagalog=include_tagalog,
     )
 
     response = {
@@ -169,7 +176,16 @@ def diagnose():
         }
 
     if include_tagalog:
-        response["tagalog"] = guidance["tagalog"]
+        # .get() rather than guidance["tagalog"]: when source == "gemini",
+        # tagalog is populated whenever include_tagalog=True reached
+        # gemini_engine (see prompt_builder.py). When source == "offline"
+        # (Gemini failed and get_guidance fell back mid-request), this
+        # assumes static_guidance.py's 12 entries always carry a "tagalog"
+        # key too — true if they're built bilingual as the project notes
+        # describe, but not re-verified here. .get() means a mismatch
+        # degrades to tagalog: null instead of a 500 on an otherwise-
+        # successful offline-fallback response.
+        response["tagalog"] = guidance.get("tagalog")
 
     # Start a chatbot session seeded with this diagnosis for follow-up Q&A.
     # Deliberately NOT passing the raw `response` dict — it can contain

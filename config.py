@@ -24,15 +24,65 @@ MAIZE_API_KEY = os.environ.get("MAIZE_API_KEY")  # shared key the Android app se
 # ahead of its official Oct 16, 2026 shutdown — Google's recommended
 # replacement for new projects is gemini-3.5-flash.
 GEMINI_MODEL = "gemini-3.5-flash"
+
+# Cheap tier for dev/debug testing and /chat follow-ups, where full CoT
+# reasoning depth on the diagnosis justification isn't needed. NOT the
+# same "2.5 Flash is blocked" trap above — 3.5 Flash-Lite is a current,
+# unblocked model. Overridable via env so local dev can swap models
+# without touching code.
+GEMINI_MODEL_LITE = os.environ.get("GEMINI_MODEL_LITE", "gemini-3.5-flash-lite")
+
+# Set GEMINI_DEV_MODE=1 in .env for local/dev work to make gemini_engine's
+# default routing favor the Lite model. Individual callers can still
+# override per-call via generate_guidance(use_lite_model=...). NEVER set
+# this in production — real farmer-facing diagnoses should stay on the
+# validated GEMINI_MODEL.
+GEMINI_DEV_MODE = os.environ.get("GEMINI_DEV_MODE", "0") == "1"
+
 GPT_COMPARISON_MODEL = "gpt-4o-mini"  # comparison-only, never called in the deployed app
 EMBEDDING_MODEL = "models/gemini-embedding-001"  # text-embedding-004 was shut down Jan 14, 2026
+
+# --- Gemini generation budget --------------------------------------------------
+# Was hardcoded as 8192 directly in gemini_engine.py; centralized here so
+# it can be tuned without touching pipeline code, and so future callers
+# don't accidentally diverge on this value.
+GEMINI_MAX_OUTPUT_TOKENS = int(os.environ.get("GEMINI_MAX_OUTPUT_TOKENS", "8192"))
+
+# Separate budget for /chat (conversation_manager.py), NOT the same value
+# as GEMINI_MAX_OUTPUT_TOKENS above. /diagnose returns a large structured
+# JSON object (justification + several multi-item lists + optional
+# Tagalog translation); /chat returns one plain-text conversational
+# reply — a fundamentally different shape, so it warrants its own budget
+# rather than sharing (or being hardcoded independently of) the
+# /diagnose value. Was hardcoded as 3500 directly in
+# conversation_manager.py; centralized here for the same reason as above.
+GEMINI_CHAT_MAX_OUTPUT_TOKENS = int(os.environ.get("GEMINI_CHAT_MAX_OUTPUT_TOKENS", "3500"))
+
+# Caps "thinking" tokens before Gemini writes its answer — these are
+# billed at the (expensive) output rate, and the CoT-heavy /diagnose
+# prompt triggers a lot of them. 0/unset = model default (uncapped).
+# NOTE: reliable thinking-budget control depends on SDK support; the
+# `google.generativeai` client this project currently uses has patchy
+# support for this across model versions — verify it actually takes
+# effect (check response usage metadata) before relying on it. This is
+# expected to get more reliable after the planned google.genai migration.
+GEMINI_THINKING_BUDGET = int(os.environ.get("GEMINI_THINKING_BUDGET", "0")) or None
 
 # --- RAG ---------------------------------------------------------------------
 CHROMA_PERSIST_DIR = os.environ.get("CHROMA_PERSIST_DIR", str(BASE_DIR / "rag" / "chroma_db"))
 KNOWLEDGE_BASE_DIR = BASE_DIR / "rag" / "knowledge_base"
 CHUNK_SIZE = 600
 CHUNK_OVERLAP = 100
-RETRIEVAL_K = 3
+# Was 3. Bumped to 5 as a test: RAGAS faithfulness scoring showed low
+# grounding on management/immediate_actions content, and one hypothesis
+# is that 3 retrieved chunks may not cover everything a full response
+# (fertilizer + chemical control + cultural practices + monitoring)
+# ends up recommending. This is a REAL production config change, not
+# eval-only — affects real /diagnose calls too. If RAGAS scores don't
+# improve after testing this, worth reverting to 3 (or trying a value
+# between) rather than assuming more is always better — more chunks can
+# also dilute retrieval relevance.
+RETRIEVAL_K = 5
 
 # --- Diagnostic thresholds ----------------------------------------------------
 LOW_CONFIDENCE_THRESHOLD = 0.6  # below this, guidance opens with an extension-officer caveat

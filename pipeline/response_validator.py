@@ -8,6 +8,7 @@ the same offline-fallback path as a timeout (see pipeline/offline_fallback.py).
 import json
 
 from pydantic import BaseModel, Field, ValidationError
+from typing import Optional
 
 
 class ControlMeasures(BaseModel):
@@ -37,7 +38,14 @@ class GeminiGuidanceResponse(BaseModel):
     control: ControlMeasures
     protocol_title: str
     protocol_steps: list[str] = Field(min_length=1)
-    tagalog: TagalogGuidance
+    # Optional, not required: gemini_engine.generate_guidance defaults to
+    # include_tagalog=False (English-only /diagnose calls, the common
+    # case), and prompt_builder now genuinely omits the "tagalog" key from
+    # the JSON schema it asks Gemini for in that case — it's not just
+    # missing by accident. Requiring this field would fail validation on
+    # every English-only call and silently trigger the offline fallback,
+    # which would have completely masked the Tagalog-generation cost fix.
+    tagalog: Optional[TagalogGuidance] = None
 
 
 class ResponseValidationError(ValueError):

@@ -41,6 +41,12 @@ def get_guidance(
     original_image,
     segmentation_image,
     xai_image,
+    # Was True. app.py always passes this explicitly, so production
+    # traffic was unaffected, but any other caller (tests, a future
+    # script) omitting it would silently get the expensive bilingual
+    # path — same issue fixed in gemini_engine.generate_guidance's
+    # default. Aligned here for consistency.
+    include_tagalog: bool = False,
 ):
     """Returns (source: 'gemini' | 'offline', guidance_dict)."""
     if force_offline:
@@ -58,6 +64,7 @@ def get_guidance(
             original_image=original_image,
             segmentation_image=segmentation_image,
             xai_image=xai_image,
+            include_tagalog=include_tagalog,
         )
         return "gemini", result.model_dump()
     except GeminiCallError as exc:

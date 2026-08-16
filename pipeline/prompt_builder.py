@@ -120,15 +120,24 @@ Now generate your response as a JSON object with this exact structure:
     "cultural": "Cultural practices (crop rotation, planting schedule, etc.)"
   }},
   "protocol_title": "MSV/MLN Rapid Response Protocol",
-  "protocol_steps": ["step1", "step2", "step3", "step4"],
-  "tagalog": {{
+  "protocol_steps": ["step1", "step2", "step3", "step4"]{tagalog_field}
+}}
+"""
+
+# Appended into the schema only when include_tagalog=True. Previously
+# this block was baked permanently into _COT_TEMPLATE, so Gemini generated
+# a full parallel Tagalog translation of every field on EVERY /diagnose
+# call regardless of the include_tagalog flag — the exact per-call output
+# token cost the project-state notes describe as already fixed. It
+# wasn't: build_cot_prompt() didn't even accept an include_tagalog
+# parameter until this change, so the flag never reached the template.
+_TAGALOG_SCHEMA_FIELD = """,
+  "tagalog": {
     "justification": "...",
     "key_fact": "...",
     "protocol_steps": ["...", "...", "...", "..."],
     "immediate_actions": ["...", "...", "..."]
-  }}
-}}
-"""
+  }"""
 
 
 def build_low_confidence_notice(confidence: float) -> str:
@@ -150,6 +159,7 @@ def build_cot_prompt(
     monitoring_stage: int,
     grade_label: str,
     rag_context: str,
+    include_tagalog: bool = False,
 ) -> str:
     return _COT_TEMPLATE.format(
         classification=classification,
@@ -161,4 +171,5 @@ def build_cot_prompt(
         low_confidence_notice=build_low_confidence_notice(confidence),
         rag_context=rag_context or "No specific retrieved context available.",
         xai_method_name=config.XAI_METHOD_DISPLAY_NAME,
+        tagalog_field=_TAGALOG_SCHEMA_FIELD if include_tagalog else "",
     )

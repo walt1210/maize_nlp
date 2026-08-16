@@ -108,3 +108,29 @@ def test_validate_gemini_output_accepts_well_formed_response():
     """
     result = validate_gemini_output(valid_json)
     assert result.justification == "j"
+    assert result.tagalog is not None
+    assert result.tagalog.justification == "j"
+
+
+def test_validate_gemini_output_accepts_response_without_tagalog():
+    # English-only is the DEFAULT /diagnose path (generate_guidance's
+    # include_tagalog now defaults to False, and prompt_builder omits the
+    # "tagalog" key from the JSON schema it asks Gemini for in that case
+    # — see prompt_builder._TAGALOG_SCHEMA_FIELD). Before tagalog was made
+    # Optional[TagalogGuidance] in response_validator, this exact shape —
+    # the common case, not an edge case — would have failed schema
+    # validation and silently triggered the offline fallback on every
+    # single English-only call.
+    valid_json_no_tagalog = """
+    {
+      "justification": "j", "xai_explanation": "x", "key_fact": "k",
+      "immediate_actions": ["a"], "management": ["m"], "spread": "s",
+      "distances": "d", "prevention": ["p"], "precautions": ["pr"],
+      "detection": "det",
+      "control": {"chemical": "c", "biological": "b", "cultural": "cu"},
+      "protocol_title": "t", "protocol_steps": ["step1"]
+    }
+    """
+    result = validate_gemini_output(valid_json_no_tagalog)
+    assert result.justification == "j"
+    assert result.tagalog is None
