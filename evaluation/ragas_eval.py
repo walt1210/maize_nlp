@@ -142,17 +142,29 @@ def run_pipeline_for_case(case: dict) -> dict:
     # don't have a checkpoint bundled yet, this will fail at generate_overlays().
     images = make_placeholder_images()
     original_image = input_processor.prepare_original_image(images["original_image_b64"])
-    segmentation_image, xai_image = xai_engine.generate_overlays(original_image, case["classification"])
-    segmentation_image = input_processor.resize_for_gemini(segmentation_image)
-    xai_image = input_processor.resize_for_gemini(xai_image)
 
-    monitoring_stage = input_processor.severity_to_stage(case["severity_pct"], case["classification"])
-    label = input_processor.grade_label(case["classification"], case["cimmyt_grade"])
-    rag_context, _sources = rag_engine.retrieve_context(
-        case["classification"], case["severity_pct"], case["cimmyt_grade"]
-    )
-
+    # Was: only generate_guidance()'s GeminiCallError was caught — the
+    # XAI overlay generation and RAG retrieval calls just below were
+    # completely unguarded. A single failure in either one crashed this
+    # entire function uncaught, which crashed the whole list
+    # comprehension building all 30 records in _load_or_generate_records
+    # — losing every already-generated (and already-paid-for) case that
+    # came before the failure too, since caching only happens after the
+    # full list finishes. Broadened to catch any exception for the same
+    # reason app.py's /diagnose route now degrades gracefully on XAI/RAG
+    # failure instead of hard-failing.
+    rag_context = ""
     try:
+        segmentation_image, xai_image = xai_engine.generate_overlays(original_image, case["classification"])
+        segmentation_image = input_processor.resize_for_gemini(segmentation_image)
+        xai_image = input_processor.resize_for_gemini(xai_image)
+
+        monitoring_stage = input_processor.severity_to_stage(case["severity_pct"], case["classification"])
+        label = input_processor.grade_label(case["classification"], case["cimmyt_grade"])
+        rag_context, _sources = rag_engine.retrieve_context(
+            case["classification"], case["severity_pct"], case["cimmyt_grade"]
+        )
+
         result = generate_guidance(
             classification=case["classification"],
             confidence=case["confidence"],
@@ -168,7 +180,7 @@ def run_pipeline_for_case(case: dict) -> dict:
         justification = result.justification
         immediate_actions = result.immediate_actions
         management = result.management
-    except GeminiCallError as exc:
+    except Exception as exc:
         failure_msg = f"[GENERATION FAILED: {exc}]"
         justification = failure_msg
         immediate_actions = [failure_msg]

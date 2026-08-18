@@ -3,6 +3,7 @@ MAIze NLP Pipeline — Flask entry point.
 Endpoints: POST /diagnose, POST /chat, POST /translate, GET /health,
 GET /offline-check.
 """
+import logging
 from functools import wraps
 
 from flask import Flask, jsonify, request
@@ -17,6 +18,7 @@ from pipeline.tagalog_handler import translate_text
 from pipeline.xai_engine import XaiEngineError
 
 app = Flask(__name__)
+logger = logging.getLogger(__name__)
 
 
 def require_api_key(view_func):
@@ -98,7 +100,16 @@ def diagnose():
         try:
             segmentation_image, xai_image = xai_engine.generate_overlays(original_image, classification)
         except XaiEngineError as exc:
-            return jsonify({"status": "error", "error": f"XAI generation failed: {exc}"}), 502
+            # Was: return 502 immediately, bypassing BOTH Gemini AND the
+            # offline fallback entirely — a farmer with a perfectly valid
+            # on-device classification got nothing at all if the XAI
+            # checkpoint had any hiccup, even though offline guidance
+            # never needed images in the first place (see
+            # static_guidance.py). Degrades to offline guidance instead,
+            # matching this project's stated design goal: "Never
+            # crashes, never leaves the farmer with nothing."
+            logger.warning("XAI generation failed, forcing offline fallback: %s", exc)
+            force_offline = True
 
     # cimmyt_grade is NOT sent by the client — the Student model only
     # outputs a continuous severity_pct (see train_student.py /
@@ -110,7 +121,24 @@ def diagnose():
     label = input_processor.grade_label(classification, cimmyt_grade)
     low_confidence = input_processor.needs_confidence_caveat(confidence)
 
-    rag_context, rag_sources = rag_engine.retrieve_context(classification, severity_pct, cimmyt_grade)
+    rag_context, rag_sources = "", []
+    if not force_offline:
+        try:
+            rag_context, rag_sources = rag_engine.retrieve_context(classification, severity_pct, cimmyt_grade)
+        except Exception as exc:
+            # Was completely unhandled — a ChromaDB or embedding-API
+            # failure here (rag_engine.py's own docstring already notes
+            # this "can fail independently of generation") propagated as
+            # a raw, unhandled 500, the same bypass-the-fallback problem
+            # as the XAI case above. Degrades to offline guidance rather
+            # than attempting Gemini generation with no retrieved
+            # context — ungrounded output is strictly worse here (the
+            # project's own RAGAS evaluation showed retrieval-grounded
+            # content scores meaningfully better on faithfulness), so
+            # well-tested static guidance is the safer degrade, not a
+            # "try Gemini anyway" middle ground.
+            logger.warning("RAG retrieval failed, forcing offline fallback: %s", exc)
+            force_offline = True
 
     source, guidance = get_guidance(
         force_offline=force_offline,
