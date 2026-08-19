@@ -1,4 +1,4 @@
-steps:
+﻿steps:
   - name: 'gcr.io/cloud-builders/docker'
     args: ['build', '-t', 'gcr.io/$PROJECT_ID/maize-nlp', '.']
   - name: 'gcr.io/cloud-builders/docker'
@@ -22,7 +22,7 @@ steps:
       # can't run gradient-based methods like Grad-CAM++. CPU-only
       # inference for one image is real added latency (model load is a
       # one-time cost per container instance, but the forward pass +
-      # Score-CAM/Grad-CAM++ computation happens every /diagnose call) —
+      # Score-CAM/Grad-CAM++ computation happens every /diagnose call) 
       # these values are a starting point, not tuned; benchmark and
       # adjust once the actual checkpoint is bundled.
       - '--max-instances=1'
@@ -30,5 +30,7 @@ steps:
       # chatbot sessions have no cross-instance affinity on Cloud Run, so
       # capping at one instance avoids a /chat follow-up landing on an
       # instance that never saw the original /diagnose session. This trades
-      # away concurrency — fine for a thesis demo, not for real scale.
+      # away concurrency - fine for a thesis demo, not for real scale.
       - '--set-secrets=GEMINI_API_KEY=gemini-api-key:latest,MAIZE_API_KEY=maize-api-key:latest'
+
+

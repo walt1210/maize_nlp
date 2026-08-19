@@ -1,4 +1,4 @@
-flask>=3.0.0
+﻿flask>=3.0.0
 gunicorn>=21.0.0
 google-generativeai>=0.7.0
 langchain>=0.2.0
@@ -19,7 +19,7 @@ pytest>=8.0.0
 
 # --- Server-side XAI/segmentation inference (pipeline/xai_engine.py) -----------
 # Needed because TFLite (on-device) can't run gradient-based XAI methods
-# like Grad-CAM++ — the full PyTorch Student model runs server-side instead.
+# like Grad-CAM++  the full PyTorch Student model runs server-side instead.
 # NOTE: this is a heavy addition. torch + segmentation-models-pytorch alone
 # add roughly 1-2 GB to the Docker image; size Cloud Run memory/CPU
 # accordingly (see cloudbuild.yaml comment).
@@ -30,7 +30,7 @@ grad-cam>=1.5.0
 opencv-python-headless>=4.9.0
 
 # --- OCR for scanned PDFs (rag/ingest.py) --------------------------------------
-# pytesseract is just a Python wrapper — it calls out to the Tesseract OCR
+# pytesseract is just a Python wrapper - it calls out to the Tesseract OCR
 # engine, which is a SEPARATE PROGRAM you must install yourself, not
 # something `pip install` can provide. On Windows, download and run the
 # installer from: https://github.com/UB-Mannheim/tesseract/wiki
@@ -38,3 +38,4 @@ opencv-python-headless>=4.9.0
 # pytesseract.pytesseract.tesseract_cmd to the full path of tesseract.exe
 # at the top of rag/ingest.py if it's not automatically found.
 pytesseract>=0.3.10
+
