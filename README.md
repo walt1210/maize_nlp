@@ -48,6 +48,7 @@ general-purpose assistant.
 - [Tesseract OCR](https://github.com/UB-Mannheim/tesseract/wiki) — only
   needed if re-running knowledge base ingestion with scanned/image-based
   source PDFs
+- (Deployment only) `gcloud` CLI, a GCP project with billing enabled
 
 ---
 
@@ -270,8 +271,16 @@ real, informative negative result, not silently discarded.
   **Evaluation** above. Revisit if a future `ragas`/`instructor` release
   fixes this, since it would allow judging on the same Gemini billing
   account used for generation.
-- **No spend cap currently set** in Google AI Studio — nothing prevents a
-  runaway cost spike. Set one under Billing → "Set spend cap".
+- **No hard spend cap exists for the Gemini API itself.** Google does not
+  offer a true dollar-amount cutoff for a billed Gemini API key (unlike
+  the free-tier AI Studio key, which just stops at zero cost). The real
+  backstop in place is a **GCP Billing Budget** (alert-only, not
+  auto-shutoff) set at $5/$9/$10 monthly thresholds with email alerts —
+  see Deployment section below. A true hard cap would require wiring the
+  budget to a Cloud Function that disables billing entirely on trip,
+  which was deliberately **not** done, since it would take the whole
+  Cloud Run service offline (not just throttle Gemini spend) — an
+  unacceptable risk immediately before a live thesis defense.
 
 ---
 
@@ -291,9 +300,24 @@ model (`generate_guidance()` also accepts an explicit `use_lite_model`
 override per call, independent of this env var, for callers like
 evaluation scripts that need to choose deliberately).
 
-**Set a spend cap** in Google AI Studio (Billing page → "Set spend cap") if
-you haven't — nothing currently prevents a runaway cost spike otherwise.
-(Still true as of this writing — see Known Limitations.)
+On Cloud Run specifically, `GEMINI_DEV_MODE` is set/unset via:
+
+```powershell
+# Enable Lite model for cheap testing
+gcloud run services update maize-nlp --region=asia-southeast1 --set-env-vars="GEMINI_DEV_MODE=1"
+
+# Disable before any real/demo use — back to the full model
+gcloud run services update maize-nlp --region=asia-southeast1 --remove-env-vars="GEMINI_DEV_MODE"
+```
+
+Each change deploys a new revision (no rebuild needed, ~30-60 seconds).
+**Always confirm this is unset before a live defense/demo** — it's easy
+to forget after a testing session.
+
+**GCP Billing Budget set** at $5/$9/$10 monthly thresholds with email
+alerts (Billing → Budgets & alerts). This is alert-only, not an automatic
+spend cap — see Known Limitations above for why no harder cutoff is wired
+up.
 
 `include_tagalog` defaults to `false` specifically to reduce cost — a full
 parallel Tagalog translation was previously generated on every single call
@@ -305,12 +329,125 @@ complete but had gaps at several points in that chain.
 
 ---
 
-## Deployment
+## Deployment (Google Cloud Run)
 
 `Dockerfile` and `cloudbuild.yaml` are set up for Google Cloud Run (4Gi
 memory, 2 CPU — needed for the PyTorch XAI checkpoint). Verify the
 checkpoint and `chroma_db/` are present before building; the Dockerfile
 checks for both.
+
+**Live service:** `https://maize-nlp-437030900334.asia-southeast1.run.app`
+Region: `asia-southeast1` (Singapore — closest to the Philippines, lowest
+latency for the app's actual users).
+
+Deploy with:
+```bash
+gcloud builds submit --config cloudbuild.yaml .
+```
+
+### First deployment — issues found and fixed
+
+Getting the first successful deployment working surfaced several real
+issues, documented here so they aren't re-discovered from scratch next
+time (e.g. after a config change, a new teammate's machine, or a fresh
+GCP project):
+
+- **`.gcloudignore` was missing.** With none present, `gcloud builds
+  submit` silently falls back to `.gitignore`'s exclusion rules for what
+  gets uploaded to Cloud Build. Since `.gitignore` correctly excludes
+  `rag/chroma_db/` and the `.pth` checkpoint from *git* (large,
+  regeneratable/binary, shouldn't bloat the repo), the same exclusion
+  wrongly applied to the *build upload* — causing the Dockerfile's own
+  existence checks to fail with `"chroma_db is empty"` even though both
+  were genuinely present locally. **Fixed** by adding an explicit
+  `.gcloudignore` that excludes the same dev-only files but *keeps*
+  `chroma_db/` and the `.pth` checkpoint, since the Docker build actually
+  needs both baked into the image.
+
+- **Missing OpenCV system libraries at container runtime.** The
+  `python:3.10-slim` base image has no graphics/GUI libraries installed.
+  `opencv-python` (pulled in transitively by `grad-cam` /
+  `segmentation-models-pytorch`, even though only
+  `opencv-python-headless` is directly listed in `requirements.txt`) still
+  needs some of these shared libraries at import time. Two surfaced one at
+  a time across successive deploys: `libxcb.so.1`, then
+  `libgthread-2.0.so.0`. **Fixed** by adding this to the `Dockerfile`
+  before `pip install`:
+  ```dockerfile
+  RUN apt-get update && apt-get install -y --no-install-recommends \
+      libxcb1 \
+      libsm6 \
+      libxext6 \
+      libgl1 \
+      libglib2.0-0 \
+      && rm -rf /var/lib/apt/lists/*
+  ```
+
+- **Public access (`allUsers`) IAM binding intermittently fails** as part
+  of `cloudbuild.yaml`'s own deploy step (exact cause not fully
+  root-caused — possibly timing-related on a fresh project). Deploy still
+  succeeds, but the service is left non-public. **Workaround**: grant it
+  manually after each deploy if the build log shows this warning:
+  ```bash
+  gcloud run services add-iam-policy-binding maize-nlp \
+    --region=asia-southeast1 --member=allUsers --role=roles/run.invoker
+  ```
+
+- **Both secrets were corrupted in Secret Manager during initial setup.**
+  An early `echo "value" | gcloud secrets create ...` mistake (pasting the
+  wrong value, then not correctly overwriting it) left both
+  `gemini-api-key` and `maize-api-key` storing 2-character garbage instead
+  of real keys. This was **not** caught by the deploy succeeding, or even
+  by the container booting successfully — it only surfaced once `/diagnose`
+  and `/chat` were actually exercised, both silently falling back to
+  offline/canned responses. Server logs showed the real cause:
+  `API key not valid` (Gemini) and `401 unauthorized` (Maize key). **Fixed**
+  by re-uploading correct values:
+  ```powershell
+  gcloud secrets versions add gemini-api-key --data-file="path\to\clean_key.txt"
+  gcloud run services update maize-nlp --region=asia-southeast1 \
+    --update-secrets=GEMINI_API_KEY=gemini-api-key:latest
+  ```
+  **Lesson for next time:** verify a secret's actual stored length right
+  after creating it —
+  ```powershell
+  (gcloud secrets versions access latest --secret=SECRET_NAME).Length
+  ```
+  — rather than assuming the upload worked. Also avoid `echo | gcloud
+  secrets create` on Windows PowerShell for anything sensitive; it can
+  introduce trailing-newline or truncation issues. Writing to a temp file
+  with `[System.IO.File]::WriteAllText(...)` first, then passing that file
+  via `--data-file=`, is more reliable.
+
+- **`UnicodeDecodeError` crash on `gcloud builds submit` itself**, before
+  any Docker step even ran. Caused by em-dash characters (`—`) in code
+  comments within `requirements.txt` being read with a mismatched encoding
+  during gcloud's own source-upload step. **Fixed** by replacing em-dashes
+  with plain hyphens in `requirements.txt`'s comments (the only file that
+  actually caused the crash — `cloudbuild.yaml` and `Dockerfile` also had
+  em-dashes in comments and were cleaned up defensively, but were not
+  confirmed to be part of the actual crash).
+
+### Cold starts
+
+The first request after a period of no traffic is noticeably slower
+(container boot: loading the PyTorch checkpoint, initializing ChromaDB,
+etc., on top of normal Gemini/XAI compute time). **Before any live
+demo/defense**, send a warm-up request a few minutes ahead of time rather
+than trusting the first real request to be fast:
+```powershell
+Invoke-RestMethod -Uri "https://maize-nlp-437030900334.asia-southeast1.run.app/health"
+```
+
+To eliminate cold starts entirely (at extra cost — a container stays
+running 24/7), set a minimum instance count temporarily:
+```powershell
+gcloud run services update maize-nlp --region=asia-southeast1 --min-instances=1
+# ...and afterward, to stop paying for an always-on container:
+gcloud run services update maize-nlp --region=asia-southeast1 --min-instances=0
+```
+Cloud Run otherwise scales to zero automatically when idle — no cost while
+unused, no manual "turning the server on/off" needed day-to-day.
 
 ---
 
@@ -339,5 +476,8 @@ maize_nlp/
 ├── evaluation/
 │   ├── ragas_eval.py         # RAGAS faithfulness/answer_relevancy scoring
 │   └── ragas_eval_final_summary_k5.md  # Documented final results
+├── Dockerfile                 # Cloud Run container build (incl. OpenCV system libs)
+├── cloudbuild.yaml            # Cloud Build + Cloud Run deploy config
+├── .gcloudignore               # Build-upload exclusions (keeps chroma_db/.pth, unlike .gitignore)
 └── tests/                    # pytest suite (21 tests)
 ```
