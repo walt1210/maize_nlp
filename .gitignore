@@ -43,3 +43,7 @@ dist/
 evaluation/ragas_eval_generation_cache*.json
 evaluation/ragas_eval_results_*.csv
 evaluation/ragas_eval_results_*.md
+
+# Expert review generation artifacts (large, contain working/pre-fix data)
+case_images/
+real_expert_review_cases*.json
