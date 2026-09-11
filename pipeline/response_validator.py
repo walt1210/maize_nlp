@@ -6,15 +6,44 @@ keys or types are present. Any validation failure here should trigger
 the same offline-fallback path as a timeout (see pipeline/offline_fallback.py).
 """
 import json
+import re
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from typing import Optional
+
+# Defense-in-depth safety net: prompt_builder.py's SYSTEM_PROMPT and schema
+# instructions tell Gemini never to state a specific dosage/application
+# rate, but instruction-following isn't 100% reliable (confirmed
+# separately -- Gemini has been observed not fully following an explicit
+# English-only language instruction in some calls). This regex catches
+# the pattern even if the prompt-level instruction is ignored: a number
+# followed immediately by a dosage-style unit (g, mL, L, kg, %) in close
+# proximity to another such number is a strong signal of a specific
+# mixing ratio/application rate, which this system must never surface
+# per its documented scope (educational/field-support only, not a
+# regulated-intervention prescriber).
+_DOSAGE_PATTERN = re.compile(
+    r"\d+\s?(g|ml|mL|L|kg)\b.{0,30}\d+\s?(g|ml|mL|L|kg)\b",
+    re.IGNORECASE,
+)
 
 
 class ControlMeasures(BaseModel):
     chemical: str
     biological: str
     cultural: str
+
+    @field_validator("chemical")
+    @classmethod
+    def no_specific_dosage(cls, v: str) -> str:
+        if _DOSAGE_PATTERN.search(v):
+            raise ValueError(
+                "chemical control field appears to contain a specific "
+                "dosage/mixing ratio, which this system must not surface "
+                "(educational/field-support scope only, not a regulated "
+                "intervention prescriber) -- rejecting response"
+            )
+        return v
 
 
 class TagalogGuidance(BaseModel):
