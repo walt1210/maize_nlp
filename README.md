@@ -451,6 +451,148 @@ unused, no manual "turning the server on/off" needed day-to-day.
 
 ---
 
+## References
+
+Source documents for `rag/knowledge_base/` (not included in this repo — copyrighted
+material, see Setup step 4). Citations below let anyone rebuild the knowledge base
+independently by sourcing these same documents and placing them at the listed filename.
+
+### Journals
+
+- Mushayi, M., Shimelis, H., Derera, J., & Tesfamariam, S. A. (2025).
+  Breeding for resistance to maize streak virus: Challenges, progress and
+  future directions: A review. *Frontiers in Plant Science*, 16, 1590870.
+  https://doi.org/10.3389/fpls.2025.1590870
+  → `Mushayi_etal_MSVResistanceBreeding_Review.pdf`
+- Santa Cruz, F. C. S., Domalanta, J. C., Minguez, L. T., Nieto, F. G. M.,
+  & Alviar, K. B. (2024). First report of maize streak virus affecting
+  maize in the Philippines. *New Disease Reports*, 50(1), e12302.
+  https://doi.org/10.1002/ndr2.12302
+  → `SantaCruz2024_MSV_FirstReport_Philippines.pdf`
+- Blankson, D., Asare-Bediako, E., Frimpong, K.A., Ampofo, E., Taah, K.J.,
+  & Van der Puije, G.C. (2018). Incidence and severity of maize streak
+  disease: The influence of tillage, fertilizer application and maize
+  variety. *African Journal of Agricultural Research*, 13(12), 551–560.
+  https://doi.org/10.5897/AJAR2017.12873
+  → `Blankson2018_MSD_TillageFertilizerVariety.pdf`
+- Chapwanya, M., Matusse, A., & Dumont, Y. (2021). On synergistic
+  co-infection in crop diseases: The case of the maize lethal necrosis
+  disease. *Applied Mathematical Modelling*, 90, 912–942.
+  https://doi.org/10.1016/j.apm.2020.09.036
+  → `Chapwanya2021_MLN_CoinfectionModeling.pdf`
+- Djomo, H.S., Suh, C., Mbong, G.A., et al. (2022). Infection coefficient
+  of maize streak virus, leafhoppers composition and control using
+  biopesticides and some cultural practices in agro-ecological zones of
+  Cameroon. *International Journal of Tropical Insect Science*, 42(2),
+  1825–1835. https://doi.org/10.1007/s42690-021-00710-5
+  → `Djomo2022_MSV_LeafhoppersCameroon.pdf`
+- Hilker, F.M., Allen, L.J.S., Bokil, V.A., et al. (2017). Modeling virus
+  coinfection to inform management of maize lethal necrosis in Kenya.
+  *Phytopathology*, 107(10), 1095–1108.
+  https://doi.org/10.1094/PHYTO-03-17-0080-FI
+  → `Hilker2017_MLN_CoinfectionModeling_Kenya.pdf`
+- Istchuk, A.N., Schwertner, M.H., Ferrari, M.L., Marques, L.H., &
+  Pietrowski, V. (2025). Nitrogen and potassium fertilization modulate
+  *Dalbulus maidis* abundance and corn stunt disease severity.
+  *Agriculture*, 15(19), 2086. https://doi.org/10.3390/agriculture15192086
+  → `Istchuk2025_NK_Fertilization_CornStunt.pdf`
+- Mudde, B., Olubayo, F.M., Miano, D.W., et al. (2018). Distribution,
+  incidence and severity of maize lethal necrosis disease in major maize
+  growing agro-ecological zones of Uganda. *Journal of Agricultural
+  Science*, 10(6), 72–85. https://doi.org/10.5539/jas.v10n6p72
+  → `Mudde2018_MLN_DistributionSeverity_Uganda.pdf`
+- Mwatuni, F.M., Redinbaugh, M.G., Miller, S., Ma, X., Aggrey, B.N., &
+  Suresh, L.M. (2022). Field deployable reverse transcriptase–recombinase
+  polymerase amplification (RT-RPA) for detection of maize chlorotic
+  mottle virus (MCMV). *Journal of General and Molecular Virology*,
+  11(1), 1–13. https://doi.org/10.5897/JGMV2022.0082
+  → `Mwatuni2022_MCMV_RTRPA_Detection.pdf`
+- Nawanich, S., & Chongrattanameteekul, W. (2014). Using insect
+  monitoring and economic threshold as decision tools in sweet corn pest
+  management. *Kasetsart Journal (Natural Science)*, 48(4), 598–604.
+  → `Nawanich2014_SweetCorn_PestThresholds.pdf`
+- Pinto, C.B., Carmo, D.d.G.d., Santos, J.L.d., et al. (2024). Optimizing
+  corn crop protection: The first sampling plan for controlling
+  *Dalbulus maidis* (Hemiptera: Cicadellidae). *Plants*, 13(13), 1779.
+  https://doi.org/10.3390/plants13131779
+  → `Pinto2024_DalbulusMaidis_SamplingPlan.pdf`
+- Tembo, M., Adediji, A.O., Bouvaine, S., Chikoti, P.C., Seal, S.E., &
+  Silva, G.C. (2020). A quick and sensitive diagnostic tool for detection
+  of maize streak virus. *Scientific Reports*, 10, 19633.
+  https://doi.org/10.1038/s41598-020-76612-2
+  → `Tembo2020_MSV_DiagnosticTool.pdf`
+
+### Books and Book Chapters
+
+- CIMMYT Maize Program. (2004). Maize diseases: A guide for field
+  identification (4th ed.). International Maize and Wheat Improvement
+  Center. https://mln.cimmyt.org/mln-resources/reports-publications
+  → `CIMMYT_MaizeDiseases_FieldGuide_4thEd.pdf`
+- De León, C. (1984). Maize diseases: A guide for field identification.
+  International Maize and Wheat Improvement Center.
+  http://hdl.handle.net/10883/3707
+  → `DeLeon1984_CIMMYT_MaizeDiseases_FieldGuide_1stEd.pdf`
+- Prasanna, B. M. (Ed.). (2021). Maize lethal necrosis (MLN): A technical
+  manual for disease management. International Maize and Wheat Improvement
+  Center. https://hdl.handle.net/10883/21703
+  → `CIMMYT_MLN_TechnicalManual.pdf`
+- Prasanna, B. M., & Suresh, L. M. (2025). Maize lethal necrosis (MLN) and
+  its management. In R. Selvarajan, V. Balasubramanian, A. Mohanasundaram,
+  K. Nagendran, & R. K. Gaur (Eds.), Detection and field management of
+  plant viruses and their vectors (pp. 1–22). Today & Tomorrow's Printers
+  and Publishers.
+  https://mln.cimmyt.org/wp-content/uploads/sites/39/2025/10/MAIZE-LETHAL-NECROSIS-MLN-AND-MANAGEMENT.pdf
+  → `Prasanna_Suresh_MLN_Chapter1_Management.pdf`
+
+### Technical Reports
+
+- Department of Agriculture – Regional Field Office Cordillera
+  Administrative Region. (n.d.). Common insect pests and diseases of corn
+  [Booklet]. Regional Corn Program.
+  https://car.da.gov.ph/category/knowledge-products-and-iecs
+  → `CornPestsAndDiseases_Guide.pdf`
+- Department of Agriculture – Regional Field Office Cordillera
+  Administrative Region, Regional Crop Protection Center. (2023). Corn
+  pest and management: Aphids [Fact sheet].
+  https://car.da.gov.ph/category/knowledge-products-and-iecs
+  → `CornPest_Aphids_Guide.pdf`
+- Phiri, N., Wan, M., & Lamontagne-Godwin, J. (2011). Maize streak virus
+  [Fact sheet]. CABI Plantwise.
+  https://factsheetadmin.plantwise.org/Uploads/PDFs/20117800551.pdf
+  → `Phiri_etal2011_MSV_Factsheet_Kenya.pdf`
+- Stuckey, R. E., Niblack, T. L., Nyvall, R. F., Krausz, J. P., & Horne,
+  C. W. (1993). Corn disease management (National Corn Handbook NCH-4,
+  Rev. ed.). Cooperative Extension Service.
+  https://corn.aae.wisc.edu/Management/pdfs/NCH04.pdf
+  → `Stuckey_etal_CornDiseaseManagement_NCH4.pdf`
+
+### Online Resources
+
+- European and Mediterranean Plant Protection Organization. (2004).
+  Emerging diseases caused by Geminiviridae. *EPPO Reporting Service*,
+  (8), Article 2004/125. https://gd.eppo.int/reporting/article-1646
+  → `EPPO2004_GeminiviridaeEmergingDiseases.pdf`
+- European and Mediterranean Plant Protection Organization. (2026a).
+  Mastrevirus storeyi (MSV000): Categorization. EPPO Global Database.
+  Retrieved August 5, 2026, from
+  https://gd.eppo.int/taxon/MSV000/categorization
+  → `EPPO_MSV000_Categorization.pdf` / `EPPO_MSV000_Categorization_Data.csv`
+- European and Mediterranean Plant Protection Organization. (2026b).
+  Mastrevirus storeyi (MSV000): Host plants. EPPO Global Database.
+  Retrieved August 5, 2026, from https://gd.eppo.int/taxon/MSV000/hosts
+  → `EPPO_MSV000_HostPlants.pdf` / `EPPO_MSV000_HostPlants_Data.csv`
+- European and Mediterranean Plant Protection Organization. (2026c).
+  Mastrevirus storeyi (MSV000): Overview. EPPO Global Database. Retrieved
+  August 5, 2026, from https://gd.eppo.int/taxon/MSV000
+  → `EPPO_MSV000_Overview.pdf`
+- European and Mediterranean Plant Protection Organization. (2026d).
+  Mastrevirus storeyi (MSV000): World distribution. EPPO Global Database.
+  Retrieved August 5, 2026, from
+  https://gd.eppo.int/taxon/MSV000/distribution
+  → `EPPO_MSV000_WorldDistribution.pdf` / `EPPO_MSV000_WorldDistribution_Data.csv`
+
+---
+
 ## Project Structure
 
 ```
